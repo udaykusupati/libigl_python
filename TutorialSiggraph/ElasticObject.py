@@ -121,11 +121,10 @@ class ElasticObject:
             
         return forces
 
-    def ComputeForceDifferentials(self, vDef, t, dvDef):
+    def ComputeForceDifferentials(self, vDef, dvDef):
         '''
         Input:
         - vDef    : position of the vertices of the deformed mesh (nV, 3)
-        - t       : indices of the element's vertices (nE, 4)
         - dvDef   : perturbation of the position of the vertices of the deformed mesh (nV, 3)
         
         Output:
@@ -137,7 +136,7 @@ class ElasticObject:
         
         disp  = np.zeros(shape=(3, 3))
         dDisp = np.zeros(shape=(3, 3))
-        for i, tet in enumerate(t):
+        for i, tet in enumerate(self.t):
             Xtet = vDef[tet]
             disp[:, 0] = Xtet[0, :] - Xtet[3, :]
             disp[:, 1] = Xtet[1, :] - Xtet[3, :]
