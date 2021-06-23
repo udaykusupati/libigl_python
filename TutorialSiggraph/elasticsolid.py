@@ -266,7 +266,7 @@ if __name__ == '__main__':
                 yield
                 if save_video:
                     # to be improved for background color
-                    prefix = len(str(int(iterations))) - len(str(i))
+                    prefix = len(str(int(iterations))) - len(str(i)) + 1
                     n_seq = '0' * prefix + str(i)
                     mlab.savefig(filename='img_{}.png'.format(n_seq),
                                  size=None)
