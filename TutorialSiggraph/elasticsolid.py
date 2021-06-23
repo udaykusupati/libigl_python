@@ -14,7 +14,8 @@ import igl
 
 class ElasticSolid(object):
 
-    def __init__(self, v, t, rho=1, young=1e6, poisson=0.2, damping=1e-2):
+    def __init__(self, v, t, rho=1, young=1e6, poisson=0.2, damping=1e-2,
+                 model='kirchhoff'):
         """
         Input:
         - v       : position of the vertices of the mesh (#v, 3)
@@ -23,6 +24,7 @@ class ElasticSolid(object):
         - young   : Young's modulus [Pa]
         - poisson : Poisson ratio
         - poisson : Damping factor
+        - model   : 'linear', 'kirchhoff' or 'neo-hookean'
         """
         self.v = v
         self.t = t
@@ -42,8 +44,10 @@ class ElasticSolid(object):
         self.W0 = None
         self.Bm = None
         self.M = None
+        self.model = model
         self.update_shape(v)
         self.velocity = np.zeros((len(self.v), 3))
+
 
     def vertex_tet_sum(self, data):
         i = self.t.flatten('F')
@@ -73,7 +77,6 @@ class ElasticSolid(object):
             self.W0 = self.W.copy()
             self.make_mass_matrix()
         self.make_jacobian()
-        self.make_strain_tensor()
         self.make_piola_kirchhoff_stress_tensor()
         self.make_elastic_forces()
 
@@ -99,27 +102,50 @@ class ElasticSolid(object):
         eye = np.zeros((len(self.F), 3, 3))
         for i in range(3):
             eye[:, i, i] = 1
-        self.E = np.einsum('lij,ljk->lik', np.swapaxes(self.F, 1, 2), self.F) - eye
-        #self.E = 0.5*(np.swapaxes(self.F, 1, 2) + self.F) - eye
+        if self.model == 'linear':
+            self.E = 0.5*(np.swapaxes(self.F, 1, 2) + self.F) - eye
+        else:
+            self.E = np.einsum('lij,ljk->lik', np.swapaxes(self.F, 1, 2), self.F) - eye
 
     def make_piola_kirchhoff_stress_tensor(self):
-        tr = np.einsum('ijj->i', self.E)
-        eye = np.zeros((len(self.t), 3, 3))
-        for i in range(3):
-            eye[:, i, i] = tr
-        self.P = np.einsum('lij,ljk->lik', self.F, 2 * self.mu * self.E + self.lbda * eye)
-        #self.P = 2 * self.mu * self.E + self.lbda * eye
+        if self.model == 'neo-hookean':
+            I3 = np.log(np.linalg.det(self.F)**2)
+            FinvT = np.swapaxes(np.linalg.inv(self.F), 1, 2)
+            self.P = (self.mu * (self.F - FinvT) +
+                      0.5 * self.lbda * np.einsum('i,ijk->ijk', I3, FinvT))
+        else:
+            self.make_strain_tensor()
+            tr = np.einsum('ijj->i', self.E)
+            eye = np.zeros((len(self.t), 3, 3))
+            for i in range(3):
+                eye[:, i, i] = tr
+            if self.model == 'kirchhoff':
+                self.P = np.einsum('lij,ljk->lik', self.F, 2 * self.mu * self.E + self.lbda * eye)
+            elif self.model == 'linear':
+                self.P = 2 * self.mu * self.E + self.lbda * eye
 
     def make_elastic_forces(self):
         H = np.einsum('lij,ljk->lik', self.P, np.swapaxes(self.Bm, 1, 2))
         H = - np.einsum('i,ijk->ijk', self.W0, H)
         fx = self.vertex_tet_sum(np.hstack((H[:, 0, 0], H[:, 0, 1], H[:, 0, 2],
-                                    -H[:, 0, 0] - H[:, 0, 1] - H[:, 0, 2])))
+                                            -H[:, 0, 0] - H[:, 0, 1] - H[:, 0, 2])))
         fy = self.vertex_tet_sum(np.hstack((H[:, 1, 0], H[:, 1, 1], H[:, 1, 2],
-                                    -H[:, 1, 0] - H[:, 1, 1] - H[:, 1, 2])))
+                                            -H[:, 1, 0] - H[:, 1, 1] - H[:, 1, 2])))
         fz = self.vertex_tet_sum(np.hstack((H[:, 2, 0], H[:, 2, 1], H[:, 2, 2],
-                                    -H[:, 2, 0] - H[:, 2, 1] - H[:, 2, 2])))
+                                            -H[:, 2, 0] - H[:, 2, 1] - H[:, 2, 2])))
         self.f = np.column_stack((fx, fy, fz))
+
+    def von_mises(self):
+        VM = (.5 * (self.P[:, 0, 0] - self.P[:, 1, 1]) ** 2 +
+              .5 * (self.P[:, 0, 0] - self.P[:, 2, 2]) ** 2 +
+              .5 * (self.P[:, 1, 1] - self.P[:, 2, 2]) ** 2 +
+              3 * (self.P[:, 0, 1]**2 + self.P[:, 0, 2]**2 +
+                   self.P[:, 1, 2]**2)) ** .5
+        return np.abs(self.vertex_tet_sum(VM))
+
+    def stress_norm(self):
+        VM = np.linalg.norm(self.P, axis=(1, 2))
+        return np.abs(self.vertex_tet_sum(VM))
 
     def compute_force_differentials(self, v_disp):
         """
@@ -150,11 +176,11 @@ class ElasticSolid(object):
         dH = np.einsum('lij,ljk->lik', dP, np.swapaxes(self.Bm, 1, 2))
         dH = np.einsum('i,ijk->ijk', self.W0, dH)
         dfx = self.vertex_tet_sum(np.hstack((dH[:, 0, 0], dH[:, 0, 1], dH[:, 0, 2],
-                                            -dH[:, 0, 0] - dH[:, 0, 1] - dH[:, 0, 2])))
+                                             -dH[:, 0, 0] - dH[:, 0, 1] - dH[:, 0, 2])))
         dfy = self.vertex_tet_sum(np.hstack((dH[:, 1, 0], dH[:, 1, 1], dH[:, 1, 2],
-                                            -dH[:, 1, 0] - dH[:, 1, 1] - dH[:, 1, 2])))
+                                             -dH[:, 1, 0] - dH[:, 1, 1] - dH[:, 1, 2])))
         dfz = self.vertex_tet_sum(np.hstack((dH[:, 2, 0], dH[:, 2, 1], dH[:, 2, 2],
-                                            -dH[:, 2, 0] - dH[:, 2, 1] - dH[:, 2, 2])))
+                                             -dH[:, 2, 0] - dH[:, 2, 1] - dH[:, 2, 2])))
         return np.column_stack((dfx, dfy, dfz))
 
     def explicit_integration_step(self, dt=1e-6):
@@ -172,7 +198,7 @@ class ElasticSolid(object):
 
             def LHS(dv):
                 return (1 / dt ** 2 * np.einsum('ij,jk->ik', M, dv) +
-                  (1 + self.gamma / dt) * self.compute_force_differentials(dv))
+                        (1 + self.gamma / dt) * self.compute_force_differentials(dv))
 
             RHS = 1 / dt * np.einsum('ij,jk->ik', M, self.velocity - new_velocity) + ft
             dv = self.conjugate_gradient(LHS, RHS)
@@ -224,7 +250,6 @@ class ElasticSolid(object):
             for i in range(n):
                 dirNormsSqA[i] = directions[:, i] @ A_directions[:, i]
         return xStar
-
 
 # -----------------------------------------------------------------------------
 #                                    Test
