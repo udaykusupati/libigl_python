@@ -7,7 +7,7 @@ Run the following commands in your terminal to create and activate the conda env
 
 ```
 conda env create -f environment.yml
-conda activate GCM_env
+conda activate gcm_env
 ```
 
 ## Run jupyter notebook

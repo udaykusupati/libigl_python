@@ -1,7 +1,5 @@
 import numpy as np
-
 from scipy import sparse
-
 import igl
 
 
@@ -14,47 +12,51 @@ import igl
 
 class ElasticSolid(object):
 
-    def __init__(self, v, t, rho=1, young=1e6, poisson=0.2, damping=1e-2,
-                 model='kirchhoff'):
-        """
+    def __init__(self, v, t, ee, rho=1, damping=1e-2):
+        '''
         Input:
         - v       : position of the vertices of the mesh (#v, 3)
         - t       : indices of the element's vertices (#t, 4)
+        - ee      : elastic energy used
         - rho     : mass per unit volume [kg.m-3]
-        - young   : Young's modulus [Pa]
-        - poisson : Poisson ratio
-        - poisson : Damping factor
-        - model   : 'linear', 'kirchhoff' or 'neo-hookean'
-        """
+        - gamma   : Damping factor
+        '''
+
         self.v = v
         self.t = t
         self.rho = rho
-        self.young = young
-        self.poisson = poisson
         self.gamma = damping
-        self.lbda = young * poisson / ((1 + poisson) * (1 - 2 * poisson))
-        self.mu = young / (2 * (1 + poisson))
-        self.W = None  # (#t,)
+        self.W  = None  # (#t,)
         self.Ds = None
         self.dv = None
-        self.F = None
-        self.E = None
-        self.P = None
-        self.f = None
+        self.F  = None
+        self.E  = None
+        self.P  = None
+        self.f  = None
         self.W0 = None # (#t,)
         self.Bm = None
-        self.M = None
-        self.model = model
+        self.M  = None
         self.update_shape(v)
         self.velocity = np.zeros((len(self.v), 3))
 
 
     def vertex_tet_sum(self, data):
-        i = self.t.flatten('F')
-        j = np.arange(len(self.t))
-        j = np.hstack((j, j, j, j))
+        '''
+        Input:
+        - data : np array of shape (#t,) or (4*#t,)
+
+        Output:
+        - m : np array of shape (#v,)
+        '''
+        i = self.t.flatten('F')        # (4*#t,)
+        j = np.arange(len(self.t))     # (#t,)
+        j = np.tile(j, 4)              # (4*#t,)
+
+        # In case we need to 
         if len(data) == len(self.t):
             data = data[j]
+
+        # Has shape (#v, #t)
         m = sparse.coo_matrix((data, (i, j)), (len(self.v), len(self.t)))
         return np.array(m.sum(axis=1)).flatten()
 
@@ -98,35 +100,18 @@ class ElasticSolid(object):
     def make_jacobian(self):
         self.F = np.einsum('lij,ljk->lik', self.Ds, self.Bm)
 
-    def make_strain_tensor(self):
-        eye = np.zeros((len(self.F), 3, 3))
-        for i in range(3):
-            eye[:, i, i] = 1
-        if self.model == 'linear':
-            self.E = 0.5*(np.swapaxes(self.F, 1, 2) + self.F) - eye
-        else:
-            self.E = np.einsum('lij,ljk->lik', np.swapaxes(self.F, 1, 2), self.F) - eye
-
-    def make_piola_kirchhoff_stress_tensor(self):
-        if self.model == 'neo-hookean':
-            I3 = np.log(np.linalg.det(self.F)**2)
-            FinvT = np.swapaxes(np.linalg.inv(self.F), 1, 2)
-            self.P = (self.mu * (self.F - FinvT) +
-                      0.5 * self.lbda * np.einsum('i,ijk->ijk', I3, FinvT))
-        else:
-            self.make_strain_tensor()
-            tr = np.einsum('ijj->i', self.E)
-            eye = np.zeros((len(self.t), 3, 3))
-            for i in range(3):
-                eye[:, i, i] = tr
-            if self.model == 'kirchhoff':
-                self.P = np.einsum('lij,ljk->lik', self.F, 2 * self.mu * self.E + self.lbda * eye)
-            elif self.model == 'linear':
-                self.P = 2 * self.mu * self.E + self.lbda * eye
-
     def make_elastic_forces(self):
+
+        # First update strain/stress tensor
+        self.E = self.ee.make_strain_tensor(self.F)
+        self.P = self.ee.make_piola_kirchhoff_stress_tensor(self.F, self.E)
+
+        # H[el] = - W0[el]*P.Bm[el]^T
         H = np.einsum('lij,ljk->lik', self.P, np.swapaxes(self.Bm, 1, 2))
         H = - np.einsum('i,ijk->ijk', self.W0, H)
+
+        # Extract forces from H
+        # First we 
         fx = self.vertex_tet_sum(np.hstack((H[:, 0, 0], H[:, 0, 1], H[:, 0, 2],
                                             -H[:, 0, 0] - H[:, 0, 1] - H[:, 0, 2])))
         fy = self.vertex_tet_sum(np.hstack((H[:, 1, 0], H[:, 1, 1], H[:, 1, 2],
@@ -286,6 +271,7 @@ if __name__ == '__main__':
             # plot the 2D mesh
             M = mlab.triangular_mesh(S.v[:, 0], S.v[:, 1], S.v[:, 2], tb)
             for i in range(iterations):
+                print("Iteration: {}".format(i))
                 S.explicit_integration_step(1e-5)
                 M.mlab_source.reset(x=S.v[:, 0], y=S.v[:, 1], z=S.v[:, 2])
                 yield
