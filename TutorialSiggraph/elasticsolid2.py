@@ -22,19 +22,21 @@ class ElasticSolid(object):
         - gamma   : Damping factor
         '''
 
-        self.v = v
-        self.t = t
-        self.rho = rho
+        self.v     = v
+        self.t     = t
+        self.ee    = ee
+        self.rho   = rho
         self.gamma = damping
-        self.W  = None  # (#t,)
+
+        self.W  = None # (#t,)
         self.Ds = None
         self.dv = None
         self.F  = None
-        self.dF = None
         self.f  = None
         self.W0 = None # (#t,)
         self.Bm = None
         self.M  = None
+
         self.update_shape(v)
         self.velocity = np.zeros((len(self.v), 3))
 
@@ -51,7 +53,6 @@ class ElasticSolid(object):
         j = np.arange(len(self.t))     # (#t,)
         j = np.tile(j, 4)              # (4*#t,)
 
-        # In case we need to 
         if len(data) == len(self.t):
             data = data[j]
 
@@ -82,10 +83,16 @@ class ElasticSolid(object):
         self.make_elastic_forces()
 
     def make_mass_matrix(self):
+        '''
+        Make a diagonal mass matrix (#v, #v)
+        '''
         M = self.vertex_tet_sum(self.W)
         self.M = 1 / 4 * M * self.rho
 
     def make_shape_matrix(self):
+        '''
+        Construct Ds that has shape (#t, 3, 3), and its inverse Bm
+        '''
         e1 = (self.v[self.t[:, 0]] - self.v[self.t[:, 3]])
         e2 = (self.v[self.t[:, 1]] - self.v[self.t[:, 3]])
         e3 = (self.v[self.t[:, 2]] - self.v[self.t[:, 3]])
@@ -167,23 +174,11 @@ class ElasticSolid(object):
         # Differential of the Jacobian
         dF = np.einsum('lij,ljk->lik', dDs, self.Bm)
 
-        # Differential of the strain tensor
-        dE = 0.5 * (np.einsum('lij,ljk->lik', np.swapaxes(dF, 1, 2), self.F) +
-                    np.einsum('lij,ljk->lik', np.swapaxes(self.F, 1, 2), dF))
-        
         # Differential of the stress tensor
-        tr = np.einsum('ijj->i', self.E)
-        I = np.zeros((len(self.F), 3, 3))
-        dtr = np.einsum('ijj->i', dE)
-        dI = np.zeros((len(self.F), 3, 3))
-        for i in range(3):
-            I[:, i, i] = tr
-            dI[:, i, i] = dtr
-        dP = (np.einsum('lij,ljk->lik', dF, 2 * self.mu * self.E + self.lbda * I) +
-              np.einsum('lij,ljk->lik', self.F, 2 * self.mu * dE + self.lbda * dI))
+        self.ee.make_differential_piola_kirchoff_stress_tensor(self.F, dF)
         
-        # Differential 
-        dH = np.einsum('lij,ljk->lik', dP, np.swapaxes(self.Bm, 1, 2))
+        # Differential of the forces
+        dH = np.einsum('lij,ljk->lik', self.ee.dP, np.swapaxes(self.Bm, 1, 2))
         dH = np.einsum('i,ijk->ijk', self.W0, dH)
         dfx = self.vertex_tet_sum(np.hstack((dH[:, 0, 0], dH[:, 0, 1], dH[:, 0, 2],
                                              -dH[:, 0, 0] - dH[:, 0, 1] - dH[:, 0, 2])))
@@ -191,17 +186,31 @@ class ElasticSolid(object):
                                              -dH[:, 1, 0] - dH[:, 1, 1] - dH[:, 1, 2])))
         dfz = self.vertex_tet_sum(np.hstack((dH[:, 2, 0], dH[:, 2, 1], dH[:, 2, 2],
                                              -dH[:, 2, 0] - dH[:, 2, 1] - dH[:, 2, 2])))
+        
+        # We stack them in a tensor of shape (#v, 3)
         return np.column_stack((dfx, dfy, dfz))
 
     def explicit_integration_step(self, dt=1e-6):
+        '''
+        Input:
+        - dt : discretization step
+        '''
+
+        # Invert the matrix on the LHS (#v, #v)
         D = np.diag((self.M + self.gamma * dt) ** -1)
         self.velocity += dt * np.einsum('ij,jk->ik', D, self.f)
-        v_disp = self.velocity * dt
+        v_disp         = self.velocity * dt
         self.displace(v_disp)
 
-    def implicit_integration_step(self, dt=1e-6, step=2):
+    def implicit_integration_step(self, dt=1e-6, steps=2):
+        '''
+        Input:
+        - dt    : discretization step
+        - steps : number of steps taken per time step
+        '''
+
         new_velocity = self.velocity.copy()
-        for i in range(step):
+        for step in range(steps):
             fd = -self.gamma * self.compute_force_differentials(new_velocity)
             ft = fd + self.f
             M = np.diag(self.M)
@@ -269,10 +278,12 @@ class ElasticSolid(object):
 if __name__ == '__main__':
 
     from mayavi import mlab
+    from elasticenergy import *
 
     v, t = igl.read_msh("meshes/ball.msh")
 
-    S = ElasticSolid(v, t, 10, 1e6, 0.2, 0)
+    ee = LinearElasticEnergy(1e6, 0.2)
+    S  = ElasticSolid(v, t, ee, rho=10, damping=0.)
 
     # initial deformation
 

@@ -1,4 +1,5 @@
 import numpy as np
+from numpy.core.einsumfunc import einsum
 from scipy import sparse
 import igl
 
@@ -178,9 +179,6 @@ class NeoHookeanElasticEnergy(ElasticEnergy):
     def __init__(self, young, poisson):
         super().__init__(young, poisson)
 
-        # Needed for the differential of stress tensor
-        self.Finv = None
-
     def make_strain_tensor(self, jac):
         eye = np.zeros((len(jac), 3, 3))
         for i in range(3):
@@ -207,21 +205,16 @@ class NeoHookeanElasticEnergy(ElasticEnergy):
 
     def make_differential_piola_kirchoff_stress_tensor(self, jac, dJac):
 
-        # First, update the differential of the strain tensor, 
-        # and the strain tensor
-        self.make_strain_tensor(jac)
-        self.make_differential_strain_tensor(jac, dJac)
-
-        # Diagonal matrices
-        tr  = np.einsum('ijj->i', self.E)
-        I   = np.zeros((len(self.F), 3, 3))
-        dtr = np.einsum('ijj->i', self.dE)
-        dI  = np.zeros((len(self.F), 3, 3))
-        for i in range(3):
-            I[:, i, i]  = tr
-            dI[:, i, i] = dtr
+        # To be reused below
+        logJ  = np.log(np.linalg.det(jac))
+        Finv  = np.linalg.inv(jac)
+        FinvT = np.swapaxes(Finv, 1, 2)
+        Fprod = np.einsum("mij, mjk, mkl -> mil", FinvT, np.swapaxes(dJac, 1, 2), FinvT)
+        trFinvdF = np.einsum("mij, mji -> m", Finv, dJac)
 
         # dP = mu*dF + (mu-lbda*log(J))*F^{-T}.dF^T.F^{-T} + lbda*tr(F^{-1}.dF)*F^{-T}
-        self.dP = (np.einsum('lij,ljk->lik', dJac, 2 * self.mu * self.E + self.lbda * I) +
-                   np.einsum('lij,ljk->lik', jac, 2 * self.mu * self.dE + self.lbda * dI))
+        self.dP = (self.mu * dJac + 
+                   (self.mu - self.lbda * logJ) * Fprod + 
+                   self.lbda * np.einsum("m, mij -> mij", trFinvdF, FinvT)
+                  )
         pass
