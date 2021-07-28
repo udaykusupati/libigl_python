@@ -30,8 +30,7 @@ class ElasticSolid(object):
         self.Ds = None
         self.dv = None
         self.F  = None
-        self.E  = None
-        self.P  = None
+        self.dF = None
         self.f  = None
         self.W0 = None # (#t,)
         self.Bm = None
@@ -61,17 +60,17 @@ class ElasticSolid(object):
         return np.array(m.sum(axis=1)).flatten()
 
     def displace(self, v_disp):
-        """
+        '''
         Input:
         - v_disp   : displacement of the vertices of the mesh (#v, 3)
-        """
+        '''
         self.update_shape(self.v + v_disp)
 
     def update_shape(self, v_def):
-        """
+        '''
         Input:
         - v_def   : position of the vertices of the mesh (#v, 3)
-        """
+        '''
         self.v = v_def
         self.make_shape_matrix()
         self.W = abs(np.linalg.det(self.Ds)) / 6
@@ -102,53 +101,77 @@ class ElasticSolid(object):
 
     def make_elastic_forces(self):
 
-        # First update strain/stress tensor
-        self.E = self.ee.make_strain_tensor(self.F)
-        self.P = self.ee.make_piola_kirchhoff_stress_tensor(self.F, self.E)
+        # First update strain/stress tensor, stored in self.ee
+        self.ee.make_piola_kirchhoff_stress_tensor(self.F)
 
         # H[el] = - W0[el]*P.Bm[el]^T
-        H = np.einsum('lij,ljk->lik', self.P, np.swapaxes(self.Bm, 1, 2))
+        H = np.einsum('lij,ljk->lik', self.ee.P, np.swapaxes(self.Bm, 1, 2))
         H = - np.einsum('i,ijk->ijk', self.W0, H)
 
-        # Extract forces from H
-        # First we 
+        # Extract forces from H of shape (#t, 3, 3)
+        # We look at each component separately, then stack them in a vector of shape (4*#t,)
+        # Then we distribute the contributions to each vertex
         fx = self.vertex_tet_sum(np.hstack((H[:, 0, 0], H[:, 0, 1], H[:, 0, 2],
                                             -H[:, 0, 0] - H[:, 0, 1] - H[:, 0, 2])))
         fy = self.vertex_tet_sum(np.hstack((H[:, 1, 0], H[:, 1, 1], H[:, 1, 2],
                                             -H[:, 1, 0] - H[:, 1, 1] - H[:, 1, 2])))
         fz = self.vertex_tet_sum(np.hstack((H[:, 2, 0], H[:, 2, 1], H[:, 2, 2],
                                             -H[:, 2, 0] - H[:, 2, 1] - H[:, 2, 2])))
+        
+        # We stack them in a tensor of shape (#v, 3)
         self.f = np.column_stack((fx, fy, fz))
 
     def von_mises(self):
-        VM = (.5 * (self.P[:, 0, 0] - self.P[:, 1, 1]) ** 2 +
-              .5 * (self.P[:, 0, 0] - self.P[:, 2, 2]) ** 2 +
-              .5 * (self.P[:, 1, 1] - self.P[:, 2, 2]) ** 2 +
-              3 * (self.P[:, 0, 1]**2 + self.P[:, 0, 2]**2 +
-                   self.P[:, 1, 2]**2)) ** .5
+        '''
+        Computes von Mises stress at each vertex, this assumes that the 
+        stress tensor is updated in self.ee
+
+        Output:
+        - VM : array of shape (#v,)
+        '''
+        VM = (.5 * (self.ee.P[:, 0, 0] - self.ee.P[:, 1, 1]) ** 2 +
+              .5 * (self.ee.P[:, 0, 0] - self.ee.P[:, 2, 2]) ** 2 +
+              .5 * (self.ee.P[:, 1, 1] - self.ee.P[:, 2, 2]) ** 2 +
+              3 * (self.ee.P[:, 0, 1]**2 + self.ee.P[:, 0, 2]**2 +
+                   self.ee.P[:, 1, 2]**2)) ** .5
         return np.abs(self.vertex_tet_sum(VM))
 
     def stress_norm(self):
-        VM = np.linalg.norm(self.P, axis=(1, 2))
+        '''
+        Computes the total stress norm, this assumes that the 
+        stress tensor is updated in self.ee
+
+        Output:
+        - VM : scalar value
+        '''
+        VM = np.linalg.norm(self.ee.P, axis=(1, 2))
         return np.abs(self.vertex_tet_sum(VM))
 
     def compute_force_differentials(self, v_disp):
-        """
+        '''
         Input:
         - v_disp   : displacement of the vertices of the mesh (#v, 3)
 
         Output:
         - df    : force differentials at the vertices of the mesh (#v, 3)
-        """
+        '''
+
+        # Compute the 
         d1 = (v_disp[self.t[:, 0]] - v_disp[self.t[:, 3]])
         d2 = (v_disp[self.t[:, 1]] - v_disp[self.t[:, 3]])
         d3 = (v_disp[self.t[:, 2]] - v_disp[self.t[:, 3]])
         dDs = np.stack((d1, d2, d3))
         dDs = np.swapaxes(dDs, 0, 1)
         dDs = np.swapaxes(dDs, 1, 2)
+
+        # Differential of the Jacobian
         dF = np.einsum('lij,ljk->lik', dDs, self.Bm)
+
+        # Differential of the strain tensor
         dE = 0.5 * (np.einsum('lij,ljk->lik', np.swapaxes(dF, 1, 2), self.F) +
                     np.einsum('lij,ljk->lik', np.swapaxes(self.F, 1, 2), dF))
+        
+        # Differential of the stress tensor
         tr = np.einsum('ijj->i', self.E)
         I = np.zeros((len(self.F), 3, 3))
         dtr = np.einsum('ijj->i', dE)
@@ -158,6 +181,8 @@ class ElasticSolid(object):
             dI[:, i, i] = dtr
         dP = (np.einsum('lij,ljk->lik', dF, 2 * self.mu * self.E + self.lbda * I) +
               np.einsum('lij,ljk->lik', self.F, 2 * self.mu * dE + self.lbda * dI))
+        
+        # Differential 
         dH = np.einsum('lij,ljk->lik', dP, np.swapaxes(self.Bm, 1, 2))
         dH = np.einsum('i,ijk->ijk', self.W0, dH)
         dfx = self.vertex_tet_sum(np.hstack((dH[:, 0, 0], dH[:, 0, 1], dH[:, 0, 2],
@@ -192,7 +217,7 @@ class ElasticSolid(object):
         self.velocity = new_velocity
 
     def conjugate_gradient(self, Ax_method, b, x0=None, eps=1e-3, max_steps=None):
-        """
+        '''
         Solves Ax = b where A is positive definite.
         A has shape (dim, dim), x and b have shape (dim, n).
 
@@ -205,7 +230,8 @@ class ElasticSolid(object):
 
         Output:
         - xStar : np array of shape (dim, n) solving the linear system
-        """
+        '''
+
         dim, n = b.shape
         if max_steps is None:
             max_steps = dim
