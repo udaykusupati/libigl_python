@@ -247,8 +247,9 @@ if __name__ == '__main__':
     v_def[:, 2] *= 1.2
 
     S.update_shape(v_def)
+    print("Done")
 
-    if True:
+    if False:
 
         # iterations of simulation
         iterations = 10
