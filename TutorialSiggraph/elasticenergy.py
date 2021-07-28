@@ -4,16 +4,11 @@ import igl
 
 class ElasticEnergy:
     def __init__(self, young, poisson):
-        """
+        '''
         Input:
-        - v       : position of the vertices of the mesh (#v, 3)
-        - t       : indices of the element's vertices (#t, 4)
-        - rho     : mass per unit volume [kg.m-3]
         - young   : Young's modulus [Pa]
         - poisson : Poisson ratio
-        - poisson : Damping factor
-        - model   : 'linear', 'kirchhoff' or 'neo-hookean'
-        """
+        '''
         self.young = young
         self.poisson = poisson
         self.lbda = young * poisson / ((1 + poisson) * (1 - 2 * poisson))
@@ -45,8 +40,8 @@ class ElasticEnergy:
         raise NotImplementedError
 
 class LinearElasticEnergy(ElasticEnergy):
-    def __init__(self, mu, lbda):
-        super().__init__(mu, lbda)
+    def __init__(self, young, poisson):
+        super().__init__(young, poisson)
 
     def make_strain_tensor(self, jac):
         eye = np.zeros((len(jac), 3, 3))
@@ -68,8 +63,8 @@ class LinearElasticEnergy(ElasticEnergy):
         return stress
 
 class KirchhoffElasticEnergy(ElasticEnergy):
-    def __init__(self, mu, lbda):
-        super().__init__(mu, lbda)
+    def __init__(self, young, poisson):
+        super().__init__(young, poisson)
 
     def make_strain_tensor(self, jac):
         eye = np.zeros((len(jac), 3, 3))
@@ -92,8 +87,8 @@ class KirchhoffElasticEnergy(ElasticEnergy):
 
 
 class NeoHookeanElasticEnergy(ElasticEnergy):
-    def __init__(self, mu, lbda):
-        super().__init__(mu, lbda)
+    def __init__(self, young, poisson):
+        super().__init__(young, poisson)
 
     def make_strain_tensor(self, jac):
         eye = np.zeros((len(jac), 3, 3))
@@ -105,11 +100,10 @@ class NeoHookeanElasticEnergy(ElasticEnergy):
         return strain
 
     def make_piola_kirchoff_stress_tensor(self, jac, strain):
-        I3 = np.log(np.linalg.det(jac)**2)
+        logJ = np.log(np.linalg.det(jac))
         # First invert, then transpose
         FinvT = np.swapaxes(np.linalg.inv(jac), 1, 2)
 
-        # P = mu*(F - F^{-T}) + lbda*log(I3)/2*F^{-T}
-        stress = (self.mu * (jac - FinvT)
-                  + 0.5 * self.lbda * np.einsum('i,ijk->ijk', I3, FinvT))
+        # P = mu*(F - F^{-T}) + lbda*log(J)*F^{-T}
+        stress = (self.mu * (jac - FinvT) + self.lbda * np.einsum('i,ijk->ijk', logJ, FinvT))
         return stress
