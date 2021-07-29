@@ -141,4 +141,6 @@ dependencies:
   - zeromq=4.3.3=hb1e8313_3
   - zipp=3.5.0=pyhd8ed1ab_0
   - zlib=1.2.11=h7795811_1010
+  - pip:
+    - pyqt5==5.10.1
 prefix: /Users/qbecker/opt/anaconda3/envs/gcm_env
