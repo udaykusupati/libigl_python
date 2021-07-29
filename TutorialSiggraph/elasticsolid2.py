@@ -80,7 +80,7 @@ class ElasticSolid(object):
             self.W0 = self.W.copy()
             self.make_mass_matrix()
         self.make_jacobian()
-        self.make_piola_kirchhoff_stress_tensor()
+        # This also updates the stress tensor for the ee
         self.make_elastic_forces()
 
     def make_mass_matrix(self):

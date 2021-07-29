@@ -277,7 +277,7 @@ if __name__ == '__main__':
         iterations = 10
 
         # save the images for video
-        save_video = True
+        save_video = False
 
         @mlab.animate(delay=10)
         def simulate():

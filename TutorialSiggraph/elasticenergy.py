@@ -44,7 +44,7 @@ class ElasticEnergy:
         print("Please specify the kind of elasticity model.")
         raise NotImplementedError
 
-    def make_piola_kirchoff_stress_tensor(self, jac):
+    def make_piola_kirchhoff_stress_tensor(self, jac):
         '''
         This method computes the stress tensor (#t, 3, 3), and stores it in self.P
 
@@ -55,7 +55,7 @@ class ElasticEnergy:
         print("Please specify the kind of elasticity model.")
         raise NotImplementedError
 
-    def make_differential_piola_kirchoff_stress_tensor(self, jac, dJac):
+    def make_differential_piola_kirchhoff_stress_tensor(self, jac, dJac):
         '''
         This method computes the stress tensor (#t, 3, 3), and stores it in self.P
 
@@ -85,7 +85,7 @@ class LinearElasticEnergy(ElasticEnergy):
         self.dE = 0.5 * (dJac + np.swapaxes(dJac, 1, 2))
         pass
 
-    def make_piola_kirchoff_stress_tensor(self, jac):
+    def make_piola_kirchhoff_stress_tensor(self, jac):
 
         # First, update the strain tensor
         self.make_strain_tensor(jac)
@@ -99,7 +99,7 @@ class LinearElasticEnergy(ElasticEnergy):
         self.P = 2 * self.mu * self.E + self.lbda * eye
         pass
 
-    def make_differential_piola_kirchoff_stress_tensor(self, jac, dJac):
+    def make_differential_piola_kirchhoff_stress_tensor(self, jac, dJac):
 
         # First, update the differential of the strain tensor, 
         # and the strain tensor
@@ -139,7 +139,7 @@ class KirchhoffElasticEnergy(ElasticEnergy):
                          np.einsum('lij,ljk->lik', np.swapaxes(jac, 1, 2), dJac))
         pass
 
-    def make_piola_kirchoff_stress_tensor(self, jac):
+    def make_piola_kirchhoff_stress_tensor(self, jac):
 
         # First, update the strain tensor
         self.make_strain_tensor(jac)
@@ -153,7 +153,7 @@ class KirchhoffElasticEnergy(ElasticEnergy):
         self.P = np.einsum('lij,ljk->lik', jac, 2 * self.mu * self.E + self.lbda * eye)
         pass
 
-    def make_differential_piola_kirchoff_stress_tensor(self, jac, dJac):
+    def make_differential_piola_kirchhoff_stress_tensor(self, jac, dJac):
 
         # First, update the differential of the strain tensor, 
         # and the strain tensor
@@ -194,7 +194,7 @@ class NeoHookeanElasticEnergy(ElasticEnergy):
                          np.einsum('lij,ljk->lik', np.swapaxes(jac, 1, 2), dJac))
         pass
 
-    def make_piola_kirchoff_stress_tensor(self, jac):
+    def make_piola_kirchhoff_stress_tensor(self, jac):
         logJ = np.log(np.linalg.det(jac))
         # First invert, then transpose
         FinvT = np.swapaxes(np.linalg.inv(jac), 1, 2)
@@ -203,7 +203,7 @@ class NeoHookeanElasticEnergy(ElasticEnergy):
         self.P = (self.mu * (jac - FinvT) + self.lbda * np.einsum('i,ijk->ijk', logJ, FinvT))
         pass
 
-    def make_differential_piola_kirchoff_stress_tensor(self, jac, dJac):
+    def make_differential_piola_kirchhoff_stress_tensor(self, jac, dJac):
 
         # To be reused below
         logJ  = np.log(np.linalg.det(jac))
