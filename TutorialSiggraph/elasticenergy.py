@@ -1,5 +1,6 @@
 import numpy as np
 from numpy.core.einsumfunc import einsum
+from numpy.core.fromnumeric import swapaxes
 from scipy import sparse
 import igl
 
@@ -170,6 +171,82 @@ class KirchhoffElasticEnergy(ElasticEnergy):
                    np.einsum('lij,ljk->lik', jac, 2 * self.mu * self.dE + self.lbda * dI))
         pass
 
+
+class CorotatedElasticEnergy(ElasticEnergy):
+    def __init__(self, young, poisson):
+        super().__init__(young, poisson)
+
+        # Polar decomposition of the Jacobian
+        self.R = None
+        self.S = None
+
+        # Save the inverse of the symmetric matrix
+        self.Sinv = None
+
+    def make_strain_tensor(self, jac):
+        eye = np.zeros((len(jac), 3, 3))
+        for i in range(3):
+            eye[:, i, i] = 1
+
+        # Eigen-decompose the Jacobian (more efficient for implicit)
+        evals, evecs = np.linalg.eigh(np.einsum('lji, ljk -> lik', jac, jac))
+        evals = np.sqrt(np.maximum(evals, 0.))
+        
+        self.S    = np.einsum('lij, lj, lkj -> lik', evecs, evals, evecs)
+        self.Sinv = np.linalg.inv(self.S)
+        self.R    = np.einsum('lij, ljk -> lik', jac, self.Sinv)
+
+        # A different option is to take the SVD of jac, which avoids inverting S
+        # (more efficient for explicit)
+
+        # E = S - I
+        self.E = self.S - eye
+        pass
+
+    def make_differential_strain_tensor(self, jac, dJac):
+        # dE = dS = 1/2*S^{-1}.(dF^T.F + F^T.dF)
+        dFTF    = np.einsum('lji, ljk -> lik', dJac, jac)
+        self.dE = 0.5 * np.einsum('lij,ljk->lik', self.Sinv, dFTF + np.swapaxes(dFTF, 1, 2))
+        pass
+
+    def make_piola_kirchhoff_stress_tensor(self, jac):
+
+        # First, update the strain tensor
+        self.make_strain_tensor(jac)
+
+        tr = np.einsum('ijj->i', self.E)
+        eye = np.zeros((len(self.E), 3, 3))
+        for i in range(3):
+            eye[:, i, i] = tr 
+
+        # P = R.(2*mu*E + lbda*tr(E)*I)
+        self.P = np.einsum('lij,ljk->lik', self.R, 2 * self.mu * self.E + self.lbda * eye)
+        pass
+
+    def make_differential_piola_kirchhoff_stress_tensor(self, jac, dJac):
+
+        # First, update the differential of the strain tensor, 
+        # and the strain tensor
+        self.make_strain_tensor(jac)
+        self.make_differential_strain_tensor(jac, dJac)
+
+        # Diagonal matrices
+        tr  = np.einsum('ijj->i', self.E)
+        I   = np.zeros((len(self.F), 3, 3))
+        dtr = np.einsum('ijj->i', self.dE)
+        dI  = np.zeros((len(self.F), 3, 3))
+        for i in range(3):
+            I[:, i, i]  = tr
+            dI[:, i, i] = dtr
+
+        # dR = (dF - R.dS).S^{-1} = (dF - R.dE).S^{-1}
+        RdE = np.einsum('lij, ljk -> lik', self.R, self.dE)
+        dR  = np.einsum('lij, ljk -> lik', dJac - RdE, self.Sinv)
+
+        # dP = dR.(2*mu*E + lbda*tr(E)*I) + R.(2*mu*dE + lbda*tr(dE)*I)
+        self.dP = (np.einsum('lij,ljk->lik', dR, 2 * self.mu * self.E + self.lbda * I) +
+                   np.einsum('lij,ljk->lik', self.R, 2 * self.mu * self.dE + self.lbda * dI))
+        pass
 
 class NeoHookeanElasticEnergy(ElasticEnergy):
     def __init__(self, young, poisson):

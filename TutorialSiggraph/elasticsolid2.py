@@ -75,7 +75,7 @@ class ElasticSolid(object):
         computes the initial mass matrix from the volume of the elements.
 
         Input:
-        - v_def   : position of the vertices of the mesh (#v, 3)
+        - v_def : position of the vertices of the mesh (#v, 3)
         '''
         self.v = v_def
         self.make_shape_matrix()
@@ -238,6 +238,7 @@ class ElasticSolid(object):
             RHS = 1 / dt * np.einsum('ij,jk->ik', M, self.velocity - new_velocity) + ft
             # New displacement
             dv = conjugate_gradient(LHS, RHS)
+            print("RHS: {}".format(np.mean(np.linalg.norm(RHS.reshape(-1, 9), axis=-1))))
             print("Velocity: {}".format(np.mean(np.linalg.norm(dv.reshape(-1, 9), axis=-1))))
             self.displace(dv)
             new_velocity += dv / dt
@@ -255,7 +256,8 @@ if __name__ == '__main__':
 
     v, t = igl.read_msh("meshes/ball.msh")
 
-    ee = LinearElasticEnergy(1e6, 0.2)
+    # ee = LinearElasticEnergy(1e6, 0.2)
+    ee = CorotatedElasticEnergy(1e6, 0.2)
     # ee = NeoHookeanElasticEnergy(1e6, 0.2)
     S  = ElasticSolid(v, t, ee, rho=10, damping=0.)
 
@@ -263,7 +265,7 @@ if __name__ == '__main__':
 
     v_def = v.copy()
 
-    v_def[:, 2] *= 2.
+    v_def[:, 2] *= 1.5
 
     S.update_shape(v_def)
     
@@ -276,7 +278,7 @@ if __name__ == '__main__':
     if True:
 
         # iterations of simulation
-        iterations = 100
+        iterations = 1000
 
         # save the images for video
         save_video = False
@@ -288,8 +290,8 @@ if __name__ == '__main__':
             # plot the 2D mesh
             M = mlab.triangular_mesh(S.v[:, 0], S.v[:, 1], S.v[:, 2], tb)
             for i in range(iterations):
-                # S.explicit_integration_step(dt=1e-5)
-                S.implicit_integration_step(dt=1e-3, steps=4)
+                S.explicit_integration_step(dt=1e-5)
+                # S.implicit_integration_step(dt=1e-3, steps=4)
                 M.mlab_source.reset(x=S.v[:, 0], y=S.v[:, 1], z=S.v[:, 2])
                 yield
                 if save_video:
