@@ -237,25 +237,31 @@ if __name__ == '__main__':
 
     v, t = igl.read_msh("meshes/ball.msh")
 
-    ee = LinearElasticEnergy(1e6, 0.2)
+    # ee = LinearElasticEnergy(1e6, 0.2)
+    ee = NeoHookeanElasticEnergy(1e6, 0.2)
     S  = ElasticSolid(v, t, ee, rho=10, damping=0.)
 
     # initial deformation
 
     v_def = v.copy()
 
-    v_def[:, 2] *= 1.2
+    v_def[:, 2] *= 2.
 
     S.update_shape(v_def)
-    print("Done")
+    
+    # # extract the boundary 2D mesh
+    # tb = igl.boundary_facets(t)
+    # # plot the 2D mesh
+    # M = mlab.triangular_mesh(S.v[:, 0], S.v[:, 1], S.v[:, 2], tb)
+    # mlab.show()
 
-    if False:
+    if True:
 
         # iterations of simulation
-        iterations = 10
+        iterations = 1000
 
         # save the images for video
-        save_video = True
+        save_video = False
 
         @mlab.animate(delay=10)
         def simulate():
@@ -264,7 +270,6 @@ if __name__ == '__main__':
             # plot the 2D mesh
             M = mlab.triangular_mesh(S.v[:, 0], S.v[:, 1], S.v[:, 2], tb)
             for i in range(iterations):
-                print("Iteration: {}".format(i))
                 S.explicit_integration_step(1e-5)
                 M.mlab_source.reset(x=S.v[:, 0], y=S.v[:, 1], z=S.v[:, 2])
                 yield
