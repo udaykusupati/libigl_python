@@ -95,7 +95,7 @@ class LinearElasticEnergy(ElasticEnergy):
         for i in range(3):
             eye[:, i, i] = tr 
 
-        # P = 2*mu*E + lbda*tr(E)*I
+        # P = 2*mu*E + lbda*tr(E)*I = 
         self.P = 2 * self.mu * self.E + self.lbda * eye
         pass
 
@@ -106,18 +106,14 @@ class LinearElasticEnergy(ElasticEnergy):
         self.make_strain_tensor(jac)
         self.make_differential_strain_tensor(jac, dJac)
 
-        # Diagonal matrices
-        tr  = np.einsum('ijj->i', self.E)
-        I   = np.zeros((len(self.F), 3, 3))
+        # Diagonal matrix
         dtr = np.einsum('ijj->i', self.dE)
-        dI  = np.zeros((len(self.F), 3, 3))
+        dI  = np.zeros((len(jac), 3, 3))
         for i in range(3):
-            I[:, i, i]  = tr
             dI[:, i, i] = dtr
 
-        # dP = dF.(2*mu*E + lbda*tr(E)*I) + F.(2*mu*dE + lbda*tr(dE)*I)
-        self.dP = (np.einsum('lij,ljk->lik', dJac, 2 * self.mu * self.E + self.lbda * I) +
-                   np.einsum('lij,ljk->lik', jac, 2 * self.mu * self.dE + self.lbda * dI))
+        # dP = 2*mu*dE + lbda*tr(dE)*I
+        self.dP = 2 * self.mu * self.dE + self.lbda * dI
         pass
 
 class KirchhoffElasticEnergy(ElasticEnergy):
@@ -206,7 +202,7 @@ class NeoHookeanElasticEnergy(ElasticEnergy):
     def make_differential_piola_kirchhoff_stress_tensor(self, jac, dJac):
 
         # To be reused below
-        logJ  = np.log(np.linalg.det(jac))
+        logJ  = np.log(np.linalg.det(jac)).reshape(-1, 1, 1) # (#t, 1, 1) for shape broadcasting
         Finv  = np.linalg.inv(jac)
         FinvT = np.swapaxes(Finv, 1, 2)
         Fprod = np.einsum("mij, mjk, mkl -> mil", FinvT, np.swapaxes(dJac, 1, 2), FinvT)

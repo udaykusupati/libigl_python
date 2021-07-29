@@ -70,6 +70,10 @@ class ElasticSolid(object):
 
     def update_shape(self, v_def):
         '''
+        Updates the displacement, the Jacobian of the displacement, and the 
+        resulting elastic forces. If called for the first time, this also 
+        computes the initial mass matrix from the volume of the elements.
+
         Input:
         - v_def   : position of the vertices of the mesh (#v, 3)
         '''
@@ -105,9 +109,15 @@ class ElasticSolid(object):
             self.Bm = np.linalg.inv(self.Ds)
 
     def make_jacobian(self):
+        '''
+        Compute the current Jacobian of the deformation
+        '''
         self.F = np.einsum('lij,ljk->lik', self.Ds, self.Bm)
 
     def make_elastic_forces(self):
+        '''
+        This method updates the elastic forces stored in self.f (#v, 3, 3) 
+        '''
 
         # First update strain/stress tensor, stored in self.ee
         self.ee.make_piola_kirchhoff_stress_tensor(self.F)
@@ -164,7 +174,7 @@ class ElasticSolid(object):
         - df    : force differentials at the vertices of the mesh (#v, 3)
         '''
 
-        # Compute the 
+        # Compute the displacement differentials
         d1 = (v_disp[self.t[:, 0]] - v_disp[self.t[:, 3]])
         d2 = (v_disp[self.t[:, 1]] - v_disp[self.t[:, 3]])
         d3 = (v_disp[self.t[:, 2]] - v_disp[self.t[:, 3]])
@@ -176,7 +186,7 @@ class ElasticSolid(object):
         dF = np.einsum('lij,ljk->lik', dDs, self.Bm)
 
         # Differential of the stress tensor
-        self.ee.make_differential_piola_kirchoff_stress_tensor(self.F, dF)
+        self.ee.make_differential_piola_kirchhoff_stress_tensor(self.F, dF)
         
         # Differential of the forces
         dH = np.einsum('lij,ljk->lik', self.ee.dP, np.swapaxes(self.Bm, 1, 2))
@@ -202,6 +212,7 @@ class ElasticSolid(object):
         self.velocity += dt * np.einsum('ij,jk->ik', D, self.f)
         v_disp         = self.velocity * dt
         self.displace(v_disp)
+        print(np.mean(np.linalg.norm(self.f.reshape(-1, 9), axis=-1)))
 
     def implicit_integration_step(self, dt=1e-6, steps=2):
         '''
@@ -211,9 +222,13 @@ class ElasticSolid(object):
         '''
 
         new_velocity = self.velocity.copy()
+        print("New time step")
         for step in range(steps):
             fd = -self.gamma * self.compute_force_differentials(new_velocity)
             ft = fd + self.f
+            print("Damping: {}".format(np.mean(np.linalg.norm(fd.reshape(-1, 9), axis=-1))))
+            print("Elastic: {}".format(np.mean(np.linalg.norm(self.f.reshape(-1, 9), axis=-1))))
+            print("Total: {}".format(np.mean(np.linalg.norm(ft.reshape(-1, 9), axis=-1))))
             M = np.diag(self.M)
 
             def LHS(dv):
@@ -221,10 +236,13 @@ class ElasticSolid(object):
                         (1 + self.gamma / dt) * self.compute_force_differentials(dv))
 
             RHS = 1 / dt * np.einsum('ij,jk->ik', M, self.velocity - new_velocity) + ft
+            # New displacement
             dv = conjugate_gradient(LHS, RHS)
+            print("Velocity: {}".format(np.mean(np.linalg.norm(dv.reshape(-1, 9), axis=-1))))
             self.displace(dv)
             new_velocity += dv / dt
         self.velocity = new_velocity
+        print()
 
 # -----------------------------------------------------------------------------
 #                                    Test
@@ -237,8 +255,8 @@ if __name__ == '__main__':
 
     v, t = igl.read_msh("meshes/ball.msh")
 
-    # ee = LinearElasticEnergy(1e6, 0.2)
-    ee = NeoHookeanElasticEnergy(1e6, 0.2)
+    ee = LinearElasticEnergy(1e6, 0.2)
+    # ee = NeoHookeanElasticEnergy(1e6, 0.2)
     S  = ElasticSolid(v, t, ee, rho=10, damping=0.)
 
     # initial deformation
@@ -258,7 +276,7 @@ if __name__ == '__main__':
     if True:
 
         # iterations of simulation
-        iterations = 1000
+        iterations = 100
 
         # save the images for video
         save_video = False
@@ -270,7 +288,8 @@ if __name__ == '__main__':
             # plot the 2D mesh
             M = mlab.triangular_mesh(S.v[:, 0], S.v[:, 1], S.v[:, 2], tb)
             for i in range(iterations):
-                S.explicit_integration_step(1e-5)
+                # S.explicit_integration_step(dt=1e-5)
+                S.implicit_integration_step(dt=1e-3, steps=4)
                 M.mlab_source.reset(x=S.v[:, 0], y=S.v[:, 1], z=S.v[:, 2])
                 yield
                 if save_video:
