@@ -29,10 +29,10 @@ def test_jacobian(solid):
 
     target_F = np.tile(F.reshape(1, 3, 3), (solid.t.shape[0], 1, 1))
     assert np.allclose(target_F, solid.F)
-
     pass
 
-def test_mass_matrix():
+def test_mass_matrix(solid):
+    assert np.allclose(np.ones(shape=(solid.t.shape[0],)) / 6, solid.W0)
     pass
 
 def test_strain_tensor(solid):
@@ -51,6 +51,14 @@ def test_strain_tensor(solid):
             [0  , 0, 1/2],
             [0  , 1, 0  ],
             [1/2, 0, 2  ]
+        ])
+    elif type(solid.ee) == CorotatedElasticEnergy:
+        print("No available test yet!")
+    else:
+        E = np.array([
+            [0  , 0  , 1/2],
+            [0  , 3/2, 0  ],
+            [1/2, 0  , 2  ]
         ])
     
     target_E = np.tile(E.reshape(1, 3, 3), (solid.t.shape[0], 1, 1))
@@ -102,9 +110,16 @@ if __name__ == '__main__':
                          pin_idx=[], f_ext=None, self_weight=True)
     test_jacobian(solid)
 
+    # Test mass matrix computation
+    solid = ElasticSolid(v, t, ee, rho=rho, damping=damping, 
+                         pin_idx=[], f_ext=None, self_weight=True)
+    test_mass_matrix(solid)
+
     # Test strain tensor computation
     solid = ElasticSolid(v, t, ee, rho=rho, damping=damping, 
                          pin_idx=[], f_ext=None, self_weight=True)
     test_strain_tensor(solid)
+
+    print("All tests are passed!")
 
     pass
