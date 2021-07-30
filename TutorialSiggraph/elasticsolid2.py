@@ -13,28 +13,30 @@ from Utils import conjugate_gradient
 
 class ElasticSolid(object):
 
-    def __init__(self, v, t, ee, rho=1, damping=1e-2, pin_idx=[], f_ext=None):
+    def __init__(self, v, t, ee, rho=1, damping=1e-2, pin_idx=[], f_ext=None, self_weight=False):
         '''
         Input:
-        - v       : position of the vertices of the mesh (#v, 3)
-        - t       : indices of the element's vertices (#t, 4)
-        - ee      : elastic energy used
-        - rho     : mass per unit volume [kg.m-3]
-        - gamma   : damping factor
-        - pin_idx : list of vertex indices to pin
-        - f_ext   : external forces 
+        - v           : position of the vertices of the mesh (#v, 3)
+        - t           : indices of the element's vertices (#t, 4)
+        - ee          : elastic energy used
+        - rho         : mass per unit volume [kg.m-3]
+        - gamma       : damping factor
+        - pin_idx     : list of vertex indices to pin
+        - f_ext       : external forces (#v, 3)
+        - self_weight : whether we add self weight or not
         '''
 
-        self.v       = v
-        self.t       = t
-        self.ee      = ee
-        self.rho     = rho
-        self.gamma   = damping
-        self.pin_idx = pin_idx
+        self.v           = v
+        self.t           = t
+        self.ee          = ee
+        self.rho         = rho
+        self.gamma       = damping
+        self.pin_idx     = pin_idx
+        self.self_weight = self_weight
 
         # Make sure f_ext has the same shape as v
         if f_ext is None:
-            f_ext = np.zeros(shape=v.shape)
+            f_ext = np.zeros_like(v)
         else:
             assert f_ext.shape == v.shape
         self.f_ext = f_ext
@@ -50,12 +52,16 @@ class ElasticSolid(object):
         self.f  = None
         self.W0 = None # (#t,)
         self.Bm = None
-        self.M  = None
+        self.M  = None # (#v,)
 
         self.update_shape(v)
         # In case we want to change the initial velocity, we should multiply by the mask
         self.velocity = self.pin_mask * np.zeros((len(self.v), 3))
 
+        if self.self_weight:
+            gravity       = np.zeros_like(v)
+            gravity[:, 2] = -9.81 #m.s-2
+            self.f_ext   += self.M.reshape(-1, 1) * gravity
 
     def vertex_tet_sum(self, data):
         '''
@@ -230,7 +236,9 @@ class ElasticSolid(object):
         self.velocity += dt * self.pin_mask * np.einsum('ij,jk->ik', D, self.f + self.f_ext)
         v_disp         = self.velocity * dt
         self.displace(v_disp) # Pinning is taken care of here as well
-        # print(np.mean(np.linalg.norm(self.f.reshape(-1, 9), axis=-1)))
+        print(np.mean(np.linalg.norm(self.f.reshape(-1, 9), axis=-1)))
+        print(np.mean(np.linalg.norm(self.f_ext.reshape(-1, 9), axis=-1)))
+        print()
 
     def implicit_integration_step(self, dt=1e-6, steps=2):
         '''
@@ -275,10 +283,11 @@ if __name__ == '__main__':
     v, t = igl.read_msh("meshes/ball.msh")
 
     # Some characteristics
-    rho     = 10  # [kg.m-3]
+    rho     = 10000  # [kg.m-3] 10000kg.m-3 to see gravity effects
     damping = 0.
     young   = 1e6 # [Pa] 
     poisson = 0.2
+    dt      = 1e-3
 
     # Find some of the lowest vertices and pin them
     minZ    = np.min(v[:, 2])
@@ -295,19 +304,15 @@ if __name__ == '__main__':
     # ee = LinearElasticEnergy(young, poisson)
     # ee = CorotatedElasticEnergy(young, poisson)
     ee = NeoHookeanElasticEnergy(young, poisson)
-    S  = ElasticSolid(v, t, ee, rho=rho, damping=damping, pin_idx=pin_idx, f_ext=f_ext)
+    S  = ElasticSolid(v, t, ee, rho=rho, damping=damping, 
+                      pin_idx=pin_idx, f_ext=None, self_weight=True)
 
     # initial deformation
-
-    v_def = v.copy()
-    # v_def[:, 2] *= 1.5
+    # This might invert some elements and make Neo Hookean energy 
+    # blow up under pinning constraints
+    # v_def = v.copy()
+    # v_def[:, 2] *= 1.5 
     # S.update_shape(v_def)
-    
-    # # extract the boundary 2D mesh
-    # tb = igl.boundary_facets(t)
-    # # plot the 2D mesh
-    # M = mlab.triangular_mesh(S.v[:, 0], S.v[:, 1], S.v[:, 2], tb)
-    # mlab.show()
 
     if True:
 
@@ -324,8 +329,8 @@ if __name__ == '__main__':
             # plot the 2D mesh
             M = mlab.triangular_mesh(S.v[:, 0], S.v[:, 1], S.v[:, 2], tb)
             for i in range(iterations):
-                S.explicit_integration_step(dt=1e-5)
-                # S.implicit_integration_step(dt=1e-3, steps=4)
+                S.explicit_integration_step(dt=dt)
+                # S.implicit_integration_step(dt=dt, steps=4)
                 M.mlab_source.reset(x=S.v[:, 0], y=S.v[:, 1], z=S.v[:, 2])
                 yield
                 if save_video:
