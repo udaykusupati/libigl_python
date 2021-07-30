@@ -127,7 +127,7 @@ class KirchhoffElasticEnergy(ElasticEnergy):
             eye[:, i, i] = 1
 
         # E = 1/2*(F^T.F - I)
-        self.E = np.einsum('lij,ljk->lik', np.swapaxes(jac, 1, 2), jac) - eye
+        self.E = 0.5 * (np.einsum('lij,ljk->lik', np.swapaxes(jac, 1, 2), jac) - eye)
         pass
 
     def make_differential_strain_tensor(self, jac, dJac):
@@ -258,7 +258,7 @@ class NeoHookeanElasticEnergy(ElasticEnergy):
             eye[:, i, i] = 1
         
         # E = 1/2*(F^T.F - I)
-        self.E = np.einsum('lij,ljk->lik', np.swapaxes(jac, 1, 2), jac) - eye
+        self.E = 0.5 * (np.einsum('lij,ljk->lik', np.swapaxes(jac, 1, 2), jac) - eye)
         pass
 
     def make_differential_strain_tensor(self, jac, dJac):
