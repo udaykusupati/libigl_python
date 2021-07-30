@@ -91,7 +91,7 @@ class ElasticSolid(object):
 
     def update_shape(self, v_def):
         '''
-        Updates the displacement, the Jacobian of the displacement, and the 
+        Updates the vertex position, the Jacobian of the deformation, and the 
         resulting elastic forces. If called for the first time, this also 
         computes the initial mass matrix from the volume of the elements.
 
@@ -99,7 +99,7 @@ class ElasticSolid(object):
         - v_def : position of the vertices of the mesh (#v, 3)
         '''
 
-        # Cn only change the unpinned ones
+        # Can only change the unpinned ones
         self.v = (1. - self.pin_mask) * self.v + self.pin_mask * v_def
         self.make_shape_matrix()
         self.W = abs(np.linalg.det(self.Ds)) / 6
