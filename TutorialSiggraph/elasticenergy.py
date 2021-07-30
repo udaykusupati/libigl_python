@@ -279,10 +279,10 @@ class NeoHookeanElasticEnergy(ElasticEnergy):
     def make_differential_piola_kirchhoff_stress_tensor(self, jac, dJac):
 
         # To be reused below
-        logJ  = np.log(np.linalg.det(jac)).reshape(-1, 1, 1) # (#t, 1, 1) for shape broadcasting
-        Finv  = np.linalg.inv(jac)
-        FinvT = np.swapaxes(Finv, 1, 2)
-        Fprod = np.einsum("mij, mjk, mkl -> mil", FinvT, np.swapaxes(dJac, 1, 2), FinvT)
+        logJ     = np.log(np.linalg.det(jac)).reshape(-1, 1, 1) # (#t, 1, 1) for shape broadcasting
+        Finv     = np.linalg.inv(jac)
+        FinvT    = np.swapaxes(Finv, 1, 2)
+        Fprod    = np.einsum("mij, mjk, mkl -> mil", FinvT, np.swapaxes(dJac, 1, 2), FinvT)
         trFinvdF = np.einsum("mij, mji -> m", Finv, dJac)
 
         # dP = mu*dF + (mu-lbda*log(J))*F^{-T}.dF^T.F^{-T} + lbda*tr(F^{-1}.dF)*F^{-T}

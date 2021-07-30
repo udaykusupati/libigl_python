@@ -13,7 +13,7 @@ from Utils import conjugate_gradient
 
 class ElasticSolid(object):
 
-    def __init__(self, v, t, ee, rho=1, damping=1e-2):
+    def __init__(self, v, t, ee, rho=1, damping=1e-2, pin_idx=[]):
         '''
         Input:
         - v       : position of the vertices of the mesh (#v, 3)
@@ -21,6 +21,7 @@ class ElasticSolid(object):
         - ee      : elastic energy used
         - rho     : mass per unit volume [kg.m-3]
         - gamma   : Damping factor
+        - pin_idx : list of vertex indices to pin
         '''
 
         self.v     = v
@@ -28,6 +29,11 @@ class ElasticSolid(object):
         self.ee    = ee
         self.rho   = rho
         self.gamma = damping
+        self.pin_idx = pin_idx
+
+        # Mask for pin constraints
+        self.pin_mask = np.array([idx not in self.pin_idx 
+                                  for idx in range(self.v.shape[0])]).reshape(-1, 1)
 
         self.W  = None # (#t,)
         self.Ds = None
@@ -39,7 +45,8 @@ class ElasticSolid(object):
         self.M  = None
 
         self.update_shape(v)
-        self.velocity = np.zeros((len(self.v), 3))
+        # In case we want to change the initial velocity, we should multiply by the mask
+        self.velocity = self.pin_mask * np.zeros((len(self.v), 3))
 
 
     def vertex_tet_sum(self, data):
@@ -66,7 +73,7 @@ class ElasticSolid(object):
         Input:
         - v_disp   : displacement of the vertices of the mesh (#v, 3)
         '''
-        self.update_shape(self.v + v_disp)
+        self.update_shape(self.v + self.pin_mask * v_disp)
 
     def update_shape(self, v_def):
         '''
@@ -191,6 +198,7 @@ class ElasticSolid(object):
         # Differential of the forces
         dH = np.einsum('lij,ljk->lik', self.ee.dP, np.swapaxes(self.Bm, 1, 2))
         dH = np.einsum('i,ijk->ijk', self.W0, dH)
+        # Same as for the elastic forces
         dfx = self.vertex_tet_sum(np.hstack((dH[:, 0, 0], dH[:, 0, 1], dH[:, 0, 2],
                                              -dH[:, 0, 0] - dH[:, 0, 1] - dH[:, 0, 2])))
         dfy = self.vertex_tet_sum(np.hstack((dH[:, 1, 0], dH[:, 1, 1], dH[:, 1, 2],
@@ -209,10 +217,10 @@ class ElasticSolid(object):
 
         # Invert the matrix on the LHS (#v, #v)
         D = np.diag((self.M + self.gamma * dt) ** -1)
-        self.velocity += dt * np.einsum('ij,jk->ik', D, self.f)
+        self.velocity += dt * self.pin_mask * np.einsum('ij,jk->ik', D, self.f)
         v_disp         = self.velocity * dt
-        self.displace(v_disp)
-        print(np.mean(np.linalg.norm(self.f.reshape(-1, 9), axis=-1)))
+        self.displace(v_disp) # Pinning is taken care of here as well
+        # print(np.mean(np.linalg.norm(self.f.reshape(-1, 9), axis=-1)))
 
     def implicit_integration_step(self, dt=1e-6, steps=2):
         '''
@@ -237,7 +245,7 @@ class ElasticSolid(object):
 
             RHS = 1 / dt * np.einsum('ij,jk->ik', M, self.velocity - new_velocity) + ft
             # New displacement
-            dv = conjugate_gradient(LHS, RHS)
+            dv = self.pin_mask * conjugate_gradient(LHS, RHS)
             print("RHS: {}".format(np.mean(np.linalg.norm(RHS.reshape(-1, 9), axis=-1))))
             print("Velocity: {}".format(np.mean(np.linalg.norm(dv.reshape(-1, 9), axis=-1))))
             self.displace(dv)
@@ -256,10 +264,14 @@ if __name__ == '__main__':
 
     v, t = igl.read_msh("meshes/ball.msh")
 
+    # Find the lowest vertex and pin it
+    pin_idx = [np.argmin(v[:, 2])]
+    print(pin_idx)
+
     # ee = LinearElasticEnergy(1e6, 0.2)
     ee = CorotatedElasticEnergy(1e6, 0.2)
     # ee = NeoHookeanElasticEnergy(1e6, 0.2)
-    S  = ElasticSolid(v, t, ee, rho=10, damping=0.)
+    S  = ElasticSolid(v, t, ee, rho=10, damping=0., pin_idx=pin_idx)
 
     # initial deformation
 
