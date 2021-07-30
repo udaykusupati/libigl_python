@@ -13,23 +13,31 @@ from Utils import conjugate_gradient
 
 class ElasticSolid(object):
 
-    def __init__(self, v, t, ee, rho=1, damping=1e-2, pin_idx=[]):
+    def __init__(self, v, t, ee, rho=1, damping=1e-2, pin_idx=[], f_ext=None):
         '''
         Input:
         - v       : position of the vertices of the mesh (#v, 3)
         - t       : indices of the element's vertices (#t, 4)
         - ee      : elastic energy used
         - rho     : mass per unit volume [kg.m-3]
-        - gamma   : Damping factor
+        - gamma   : damping factor
         - pin_idx : list of vertex indices to pin
+        - f_ext   : external forces 
         '''
 
-        self.v     = v
-        self.t     = t
-        self.ee    = ee
-        self.rho   = rho
-        self.gamma = damping
+        self.v       = v
+        self.t       = t
+        self.ee      = ee
+        self.rho     = rho
+        self.gamma   = damping
         self.pin_idx = pin_idx
+
+        # Make sure f_ext has the same shape as v
+        if f_ext is None:
+            f_ext = np.zeros(shape=v.shape)
+        else:
+            assert f_ext.shape == v.shape
+        self.f_ext = f_ext
 
         # Mask for pin constraints
         self.pin_mask = np.array([idx not in self.pin_idx 
@@ -84,7 +92,9 @@ class ElasticSolid(object):
         Input:
         - v_def : position of the vertices of the mesh (#v, 3)
         '''
-        self.v = v_def
+
+        # Cn only change the unpinned ones
+        self.v = (1. - self.pin_mask) * self.v + self.pin_mask * v_def
         self.make_shape_matrix()
         self.W = abs(np.linalg.det(self.Ds)) / 6
         if self.W0 is None:
@@ -217,7 +227,7 @@ class ElasticSolid(object):
 
         # Invert the matrix on the LHS (#v, #v)
         D = np.diag((self.M + self.gamma * dt) ** -1)
-        self.velocity += dt * self.pin_mask * np.einsum('ij,jk->ik', D, self.f)
+        self.velocity += dt * self.pin_mask * np.einsum('ij,jk->ik', D, self.f + self.f_ext)
         v_disp         = self.velocity * dt
         self.displace(v_disp) # Pinning is taken care of here as well
         # print(np.mean(np.linalg.norm(self.f.reshape(-1, 9), axis=-1)))
@@ -233,7 +243,7 @@ class ElasticSolid(object):
         print("New time step")
         for step in range(steps):
             fd = -self.gamma * self.compute_force_differentials(new_velocity)
-            ft = fd + self.f
+            ft = fd + self.f + self.f_ext
             print("Damping: {}".format(np.mean(np.linalg.norm(fd.reshape(-1, 9), axis=-1))))
             print("Elastic: {}".format(np.mean(np.linalg.norm(self.f.reshape(-1, 9), axis=-1))))
             print("Total: {}".format(np.mean(np.linalg.norm(ft.reshape(-1, 9), axis=-1))))
@@ -264,22 +274,34 @@ if __name__ == '__main__':
 
     v, t = igl.read_msh("meshes/ball.msh")
 
-    # Find the lowest vertex and pin it
-    pin_idx = [np.argmin(v[:, 2])]
-    print(pin_idx)
+    # Some characteristics
+    rho     = 10  # [kg.m-3]
+    damping = 0.
+    young   = 1e6 # [Pa] 
+    poisson = 0.2
 
-    # ee = LinearElasticEnergy(1e6, 0.2)
-    ee = CorotatedElasticEnergy(1e6, 0.2)
-    # ee = NeoHookeanElasticEnergy(1e6, 0.2)
-    S  = ElasticSolid(v, t, ee, rho=10, damping=0., pin_idx=pin_idx)
+    # Find some of the lowest vertices and pin them
+    minZ    = np.min(v[:, 2])
+    pin_idx = np.arange(v.shape[0])[v[:, 2] < minZ + 0.1]
+    print("Pinned vertices: {}".format(pin_idx))
+
+    # Add forces at the top 
+    maxZ      = np.max(v[:, 2])
+    force_idx = np.arange(v.shape[0])[v[:, 2] > maxZ - 0.1]
+    f_ext     = np.zeros_like(v)
+    f_ext[force_idx, 0] = 1e3 # [N]
+    print("Vertices on which a force is applied: {}".format(force_idx))
+
+    # ee = LinearElasticEnergy(young, poisson)
+    # ee = CorotatedElasticEnergy(young, poisson)
+    ee = NeoHookeanElasticEnergy(young, poisson)
+    S  = ElasticSolid(v, t, ee, rho=rho, damping=damping, pin_idx=pin_idx, f_ext=f_ext)
 
     # initial deformation
 
     v_def = v.copy()
-
-    v_def[:, 2] *= 1.5
-
-    S.update_shape(v_def)
+    # v_def[:, 2] *= 1.5
+    # S.update_shape(v_def)
     
     # # extract the boundary 2D mesh
     # tb = igl.boundary_facets(t)
