@@ -2,6 +2,7 @@ from elasticsolid2 import *
 from elasticenergy import *
 from mayavi import mlab
 import igl
+from scipy.linalg import polar
 
 def test_jacobian_translation(solid):
     dv_def = np.zeros_like(solid.v)
@@ -54,7 +55,8 @@ def test_strain_tensor(solid):
             [1/2, 0, 2  ]
         ])
     elif type(solid.ee) == CorotatedElasticEnergy:
-        print("No available test yet!")
+        _, S = polar(F)
+        E    = S - np.eye(3)
     else:
         E = np.array([
             [0  , 0  , 1/2],
@@ -91,7 +93,9 @@ def test_stress_tensor(solid):
             [3, 0 , 45]
         ])
     elif type(solid.ee) == CorotatedElasticEnergy:
-        print("No available test yet!")
+        R, S = polar(F)
+        E    = S - np.eye(3)
+        P    = R @ (2*E + np.trace(E)*np.eye(3))
     elif type(solid.ee) == NeoHookeanElasticEnergy:
         logJ = np.log(6)
         P = np.array([
@@ -138,8 +142,8 @@ if __name__ == '__main__':
     # mlab.show()
 
     # ee = LinearElasticEnergy(young, poisson)
-    ee = KirchhoffElasticEnergy(young, poisson)
-    # ee = CorotatedElasticEnergy(young, poisson)
+    # ee = KirchhoffElasticEnergy(young, poisson)
+    ee = CorotatedElasticEnergy(young, poisson)
     # ee = NeoHookeanElasticEnergy(young, poisson)
 
     # Test independence to translation
