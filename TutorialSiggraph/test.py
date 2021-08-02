@@ -14,8 +14,8 @@ def test_jacobian_translation(solid):
     # Should be the identity
     target_F = np.tile(np.eye(3).reshape(1, 3, 3), (solid.t.shape[0], 1, 1))
 
-    assert np.allclose(target_F, solid.F)
-    pass
+    passed = np.allclose(target_F, solid.F)
+    return passed
 
 def test_jacobian(solid):
     F = np.array([
@@ -29,12 +29,12 @@ def test_jacobian(solid):
     solid.update_shape(v_def)
 
     target_F = np.tile(F.reshape(1, 3, 3), (solid.t.shape[0], 1, 1))
-    assert np.allclose(target_F, solid.F)
-    pass
+    passed =  np.allclose(target_F, solid.F)
+    return passed
 
 def test_mass_matrix(solid):
-    assert np.allclose(np.ones(shape=(solid.t.shape[0],)) / 6, solid.W0)
-    pass
+    passed = np.allclose(np.ones(shape=(solid.t.shape[0],)) / 6, solid.W0)
+    return passed
 
 def test_strain_tensor(solid):
     F = np.array([
@@ -65,9 +65,8 @@ def test_strain_tensor(solid):
         ])
     
     target_E = np.tile(E.reshape(1, 3, 3), (solid.t.shape[0], 1, 1))
-    assert np.allclose(target_E, solid.ee.E)
-
-    pass
+    passed = np.allclose(target_E, solid.ee.E)
+    return passed
 
 def test_diff_strain_tensor(solid):
 
@@ -112,7 +111,8 @@ def test_diff_strain_tensor(solid):
         ])
     
     target_dE = np.tile(dE.reshape(1, 3, 3), (solid.t.shape[0], 1, 1))
-    assert np.allclose(target_dE, solid.ee.dE)
+    passed = np.allclose(target_dE, solid.ee.dE)
+    return passed
 
 def test_stress_tensor(solid):
     F = np.array([
@@ -153,9 +153,8 @@ def test_stress_tensor(solid):
         raise NotImplementedError
     
     target_P = np.tile(P.reshape(1, 3, 3), (solid.t.shape[0], 1, 1))
-    assert np.allclose(target_P, solid.ee.P)
-
-    pass
+    passed = np.allclose(target_P, solid.ee.P)
+    return passed
 
 def test_diff_stress_tensor(solid):
 
@@ -218,12 +217,25 @@ def test_diff_stress_tensor(solid):
         raise NotImplementedError
     
     target_dP = np.tile(dP.reshape(1, 3, 3), (solid.t.shape[0], 1, 1))
-    assert np.allclose(target_dP, solid.ee.dP)
+    passed = np.allclose(target_dP, solid.ee.dP)
+    return passed
 
 def test_von_mises():
     pass
 
 if __name__ == '__main__':
+
+    # For some verbosity
+    name_tests   = [
+        "Translation Jacobian",
+        "Jacobian computation",
+        "Mass computation",
+        "Strain computation",
+        "Differential strain computation",
+        "Stress computation",
+        "Differential stress computation"
+    ]
+    passed_tests = {name:False for name in name_tests}
 
     # Some characteristics
     rho     = 1. # [kg.m-3]
@@ -257,38 +269,41 @@ if __name__ == '__main__':
     # Test independence to translation
     solid = ElasticSolid(v, t, ee, rho=rho, damping=damping, 
                          pin_idx=[], f_ext=None, self_weight=True)
-    test_jacobian_translation(solid)
+    passed_tests["Translation Jacobian"] = test_jacobian_translation(solid)
 
     # Test Jacobian computation
     solid = ElasticSolid(v, t, ee, rho=rho, damping=damping, 
                          pin_idx=[], f_ext=None, self_weight=True)
-    test_jacobian(solid)
+    passed_tests["Jacobian computation"] = test_jacobian(solid)
 
     # Test mass matrix computation
     solid = ElasticSolid(v, t, ee, rho=rho, damping=damping, 
                          pin_idx=[], f_ext=None, self_weight=True)
-    test_mass_matrix(solid)
+    passed_tests["Mass computation"] = test_mass_matrix(solid)
 
     # Test strain tensor computation
     solid = ElasticSolid(v, t, ee, rho=rho, damping=damping, 
                          pin_idx=[], f_ext=None, self_weight=True)
-    test_strain_tensor(solid)
+    passed_tests["Strain computation"] = test_strain_tensor(solid)
 
     # Test differential strain tensor computation
     solid = ElasticSolid(v, t, ee, rho=rho, damping=damping, 
                          pin_idx=[], f_ext=None, self_weight=True)
-    test_diff_strain_tensor(solid)
+    passed_tests["Differential strain computation"] = test_diff_strain_tensor(solid)
 
     # Test stress tensor computation
     solid = ElasticSolid(v, t, ee, rho=rho, damping=damping, 
                          pin_idx=[], f_ext=None, self_weight=True)
-    test_stress_tensor(solid)
+    passed_tests["Stress computation"] = test_stress_tensor(solid)
 
     # Test differential stress tensor computation
     solid = ElasticSolid(v, t, ee, rho=rho, damping=damping, 
                          pin_idx=[], f_ext=None, self_weight=True)
-    test_diff_stress_tensor(solid)
+    passed_tests["Differential stress computation"] = test_diff_stress_tensor(solid)
 
-    print("All tests are passed!")
-
+    print("==========      Results      ==========\n")
+    frac_passed = sum(passed_tests.values()) / max(1, len(passed_tests))
+    print("Test passed: {:.0f}%\n".format(100*frac_passed))
+    for (name, passed) in passed_tests.items():
+        print(name + ": {}".format(passed))
     pass
