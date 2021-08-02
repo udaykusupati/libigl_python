@@ -46,7 +46,7 @@ def test_strain_tensor(solid):
     v_def = solid.v @ F.T
     # Updates the Jacobian, then compute the strain tensor
     solid.update_shape(v_def)
-    solid.ee.make_strain_tensor(solid.F)
+    solid.ee.make_strain_tensor(solid.F) # Needed for NeoHookeanElasticEnergy
 
     if type(solid.ee) == LinearElasticEnergy:
         E = np.array([
@@ -68,6 +68,52 @@ def test_strain_tensor(solid):
     assert np.allclose(target_E, solid.ee.E)
 
     pass
+
+def test_diff_strain_tensor(solid):
+
+    F = np.array([
+        [1, 0, 1],
+        [0, 2, 0],
+        [0, 0, 3]
+    ])
+
+    dF = np.array([
+        [2, 0, 4],
+        [0, 1, 0],
+        [0, 0, 3]
+    ])
+
+    tiled_dF = np.tile(dF.reshape(1, 3, 3), (solid.t.shape[0], 1, 1))
+
+    v_def = solid.v @ F.T
+    # Updates the Jacobian, then compute the strain tensor
+    solid.update_shape(v_def)
+    solid.ee.make_differential_strain_tensor(solid.F, tiled_dF)
+
+    if type(solid.ee) == LinearElasticEnergy:
+        dE = np.array([
+            [2, 0, 2],
+            [0, 1, 0],
+            [2, 0, 3]
+        ])
+    elif type(solid.ee) == CorotatedElasticEnergy:
+        _, S = polar(F)
+        Sinv = np.linalg.inv(S)
+        dE = Sinv @ np.array([
+            [2, 0, 3 ],
+            [0, 2, 0 ],
+            [3, 0, 13]
+        ])
+    else:
+        dE = np.array([
+            [2, 0, 3 ],
+            [0, 2, 0 ],
+            [3, 0, 13]
+        ])
+    
+    target_dE = np.tile(dE.reshape(1, 3, 3), (solid.t.shape[0], 1, 1))
+    
+    assert np.allclose(target_dE, solid.ee.dE)
 
 def test_stress_tensor(solid):
     F = np.array([
@@ -165,6 +211,11 @@ if __name__ == '__main__':
     solid = ElasticSolid(v, t, ee, rho=rho, damping=damping, 
                          pin_idx=[], f_ext=None, self_weight=True)
     test_strain_tensor(solid)
+
+    # Test differential strain tensor computation
+    solid = ElasticSolid(v, t, ee, rho=rho, damping=damping, 
+                         pin_idx=[], f_ext=None, self_weight=True)
+    test_diff_strain_tensor(solid)
 
     # Test stress tensor computation
     solid = ElasticSolid(v, t, ee, rho=rho, damping=damping, 
