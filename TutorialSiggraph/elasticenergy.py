@@ -159,9 +159,9 @@ class KirchhoffElasticEnergy(ElasticEnergy):
 
         # Diagonal matrices
         tr  = np.einsum('ijj->i', self.E)
-        I   = np.zeros((len(self.F), 3, 3))
+        I   = np.zeros((len(jac), 3, 3))
         dtr = np.einsum('ijj->i', self.dE)
-        dI  = np.zeros((len(self.F), 3, 3))
+        dI  = np.zeros((len(jac), 3, 3))
         for i in range(3):
             I[:, i, i]  = tr
             dI[:, i, i] = dtr
@@ -232,9 +232,9 @@ class CorotatedElasticEnergy(ElasticEnergy):
 
         # Diagonal matrices
         tr  = np.einsum('ijj->i', self.E)
-        I   = np.zeros((len(self.F), 3, 3))
+        I   = np.zeros((len(jac), 3, 3))
         dtr = np.einsum('ijj->i', self.dE)
-        dI  = np.zeros((len(self.F), 3, 3))
+        dI  = np.zeros((len(jac), 3, 3))
         for i in range(3):
             I[:, i, i]  = tr
             dI[:, i, i] = dtr

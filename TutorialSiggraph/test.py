@@ -112,7 +112,6 @@ def test_diff_strain_tensor(solid):
         ])
     
     target_dE = np.tile(dE.reshape(1, 3, 3), (solid.t.shape[0], 1, 1))
-    
     assert np.allclose(target_dE, solid.ee.dE)
 
 def test_stress_tensor(solid):
@@ -158,6 +157,57 @@ def test_stress_tensor(solid):
 
     pass
 
+def test_diff_stress_tensor(solid):
+
+    F = np.array([
+        [1, 0, 1],
+        [0, 2, 0],
+        [0, 0, 3]
+    ])
+
+    dF = np.array([
+        [2, 0, 4],
+        [0, 1, 0],
+        [0, 0, 3]
+    ])
+
+    tiled_dF = np.tile(dF.reshape(1, 3, 3), (solid.t.shape[0], 1, 1))
+
+    v_def = solid.v @ F.T
+    # Updates the Jacobian, then compute the strain tensor
+    solid.update_shape(v_def)
+    solid.ee.make_differential_piola_kirchhoff_stress_tensor(solid.F, tiled_dF)
+
+    if type(solid.ee) == LinearElasticEnergy:
+        dP = np.array([
+            [10, 0, 4 ],
+            [0 , 8, 0 ],
+            [4 , 0, 12]
+        ])
+    elif type(solid.ee) == KirchhoffElasticEnergy:
+        dP = np.array([
+            [43, 0 , 111],
+            [0 , 51, 0  ],
+            [21, 0 , 174]
+        ])
+    elif type(solid.ee) == CorotatedElasticEnergy:
+        R, S = polar(F)
+        E    = S - np.eye(3)
+        P    = R @ (2*E + np.trace(E)*np.eye(3))
+    elif type(solid.ee) == NeoHookeanElasticEnergy:
+        logJ = np.log(6)
+        dP = np.array([
+            [15/2-2*logJ  , 0       , 4            ],
+            [0            , 3-logJ/4, 0            ],
+            [-(5+2*logJ)/6, 0       , (27-2*logJ)/6]
+        ])
+    else:
+        print("Unknown energy model.")
+        raise NotImplementedError
+    
+    target_dP = np.tile(dP.reshape(1, 3, 3), (solid.t.shape[0], 1, 1))
+    assert np.allclose(target_dP, solid.ee.dP)
+
 def test_von_mises():
     pass
 
@@ -189,8 +239,8 @@ if __name__ == '__main__':
 
     # ee = LinearElasticEnergy(young, poisson)
     # ee = KirchhoffElasticEnergy(young, poisson)
-    ee = CorotatedElasticEnergy(young, poisson)
-    # ee = NeoHookeanElasticEnergy(young, poisson)
+    # ee = CorotatedElasticEnergy(young, poisson)
+    ee = NeoHookeanElasticEnergy(young, poisson)
 
     # Test independence to translation
     solid = ElasticSolid(v, t, ee, rho=rho, damping=damping, 
@@ -221,6 +271,11 @@ if __name__ == '__main__':
     solid = ElasticSolid(v, t, ee, rho=rho, damping=damping, 
                          pin_idx=[], f_ext=None, self_weight=True)
     test_stress_tensor(solid)
+
+    # Test differential stress tensor computation
+    solid = ElasticSolid(v, t, ee, rho=rho, damping=damping, 
+                         pin_idx=[], f_ext=None, self_weight=True)
+    test_diff_stress_tensor(solid)
 
     print("All tests are passed!")
 
