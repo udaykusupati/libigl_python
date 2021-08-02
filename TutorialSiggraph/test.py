@@ -193,7 +193,19 @@ def test_diff_stress_tensor(solid):
     elif type(solid.ee) == CorotatedElasticEnergy:
         R, S = polar(F)
         E    = S - np.eye(3)
-        P    = R @ (2*E + np.trace(E)*np.eye(3))
+
+        # Compute dS then dR
+        Sinv = np.linalg.inv(S)
+        dS = Sinv @ np.array([
+            [2, 0, 3 ],
+            [0, 2, 0 ],
+            [3, 0, 13]
+        ])
+        dR = (dF - R @ dS) @ Sinv
+
+        dP = (dR @ (2 * E + np.trace(E) * np.eye(3)) + 
+              R @ (2 * dS + np.trace(dS) * np.eye(3)))
+
     elif type(solid.ee) == NeoHookeanElasticEnergy:
         logJ = np.log(6)
         dP = np.array([
@@ -214,7 +226,7 @@ def test_von_mises():
 if __name__ == '__main__':
 
     # Some characteristics
-    rho     = 1  # [kg.m-3]
+    rho     = 1. # [kg.m-3]
     damping = 0.
 
     # Choose E and nu, so that mu = lambda = 1
@@ -239,8 +251,8 @@ if __name__ == '__main__':
 
     # ee = LinearElasticEnergy(young, poisson)
     # ee = KirchhoffElasticEnergy(young, poisson)
-    # ee = CorotatedElasticEnergy(young, poisson)
-    ee = NeoHookeanElasticEnergy(young, poisson)
+    ee = CorotatedElasticEnergy(young, poisson)
+    # ee = NeoHookeanElasticEnergy(young, poisson)
 
     # Test independence to translation
     solid = ElasticSolid(v, t, ee, rho=rho, damping=damping, 
