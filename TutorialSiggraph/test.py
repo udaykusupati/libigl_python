@@ -29,7 +29,34 @@ def test_jacobian(solid):
     solid.update_shape(v_def)
 
     target_F = np.tile(F.reshape(1, 3, 3), (solid.t.shape[0], 1, 1))
-    passed =  np.allclose(target_F, solid.F)
+    passed   = np.allclose(target_F, solid.F)
+    return passed
+
+def test_diff_jacobian(solid):
+    F = np.array([
+        [1, 0, 1],
+        [0, 2, 0],
+        [0, 0, 3]
+    ])
+
+    dF = np.array([
+        [2, 0, 4],
+        [0, 1, 0],
+        [0, 0, 3]
+    ])
+
+    tiled_dF = np.tile(dF.reshape(1, 3, 3), (solid.t.shape[0], 1, 1))
+
+    # Find the correct dv
+    v_def = solid.v @ F.T
+    v_plus_dv_def = solid.v @ (F + dF).T
+    dv_def = v_plus_dv_def - v_def
+
+    # Updates the Jacobian
+    solid.update_shape(v_def)
+    solid.compute_force_differentials(dv_def)
+
+    passed   = np.allclose(tiled_dF, solid.dF)
     return passed
 
 def test_mass_matrix(solid):
@@ -229,6 +256,7 @@ if __name__ == '__main__':
     name_tests   = [
         "Translation Jacobian",
         "Jacobian computation",
+        "Differential Jacobian computation",
         "Mass computation",
         "Strain computation",
         "Differential strain computation",
@@ -275,6 +303,11 @@ if __name__ == '__main__':
     solid = ElasticSolid(v, t, ee, rho=rho, damping=damping, 
                          pin_idx=[], f_ext=None, self_weight=True)
     passed_tests["Jacobian computation"] = test_jacobian(solid)
+
+    # Test differential Jacobian computation
+    solid = ElasticSolid(v, t, ee, rho=rho, damping=damping, 
+                         pin_idx=[], f_ext=None, self_weight=True)
+    passed_tests["Differential Jacobian computation"] = test_diff_jacobian(solid)
 
     # Test mass matrix computation
     solid = ElasticSolid(v, t, ee, rho=rho, damping=damping, 
