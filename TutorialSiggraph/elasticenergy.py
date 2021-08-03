@@ -16,10 +16,11 @@ class ElasticEnergy:
         self.lbda = young * poisson / ((1 + poisson) * (1 - 2 * poisson))
         self.mu = young / (2 * (1 + poisson))
 
-        self.E  = None
-        self.dE = None
-        self.P  = None
-        self.dP = None
+        self.E   = None
+        self.dE  = None
+        self.psi = None
+        self.P   = None
+        self.dP  = None
     
     def make_strain_tensor(self, jac):
         '''
@@ -40,6 +41,18 @@ class ElasticEnergy:
         Input:
         - jac  : jacobian of the deformation (#t, 3, 3)
         - dJac : differential of the jacobian of the deformation (#t, 3, 3)
+        '''
+
+        print("Please specify the kind of elasticity model.")
+        raise NotImplementedError
+
+    def make_energy_density(self, jac):
+        '''
+        This method computes the energy density at each tetrahedron (#t,),
+        and stores the result in self.psi
+
+        Input:
+        - jac  : jacobian of the deformation (#t, 3, 3)
         '''
 
         print("Please specify the kind of elasticity model.")
@@ -84,6 +97,16 @@ class LinearElasticEnergy(ElasticEnergy):
     def make_differential_strain_tensor(self, jac, dJac):
         # dE = 1/2*(dF + dF^T)
         self.dE = 0.5 * (dJac + np.swapaxes(dJac, 1, 2))
+        pass
+
+    def make_energy_density(self, jac):
+        
+        # First, update the strain tensor
+        self.make_strain_tensor(jac)
+
+        # psi = mu*E:E + lbda/2*Tr(E)^2
+        self.psi = (self.mu * np.einsum('mij,mij->m', self.E, self.E) +
+                    self.lbda/2 * np.einsum('mii->m', self.E) ** 2)
         pass
 
     def make_piola_kirchhoff_stress_tensor(self, jac):
@@ -134,6 +157,16 @@ class KirchhoffElasticEnergy(ElasticEnergy):
         # dE = 1/2*(dF^T.F + dF.F^T)
         self.dE = 0.5 * (np.einsum('lij,ljk->lik', np.swapaxes(dJac, 1, 2), jac) +
                          np.einsum('lij,ljk->lik', np.swapaxes(jac, 1, 2), dJac))
+        pass
+
+    def make_energy_density(self, jac):
+        
+        # First, update the strain tensor
+        self.make_strain_tensor(jac)
+
+        # psi = mu*E:E + lbda/2*Tr(E)^2
+        self.psi = (self.mu * np.einsum('mij,mij->m', self.E, self.E) +
+                    self.lbda/2 * np.einsum('mii->m', self.E) ** 2)
         pass
 
     def make_piola_kirchhoff_stress_tensor(self, jac):
@@ -209,6 +242,16 @@ class CorotatedElasticEnergy(ElasticEnergy):
         self.dE = 0.5 * np.einsum('lij,ljk->lik', self.Sinv, dFTF + np.swapaxes(dFTF, 1, 2))
         pass
 
+    def make_energy_density(self, jac):
+        
+        # First, update the strain tensor
+        self.make_strain_tensor(jac)
+
+        # psi = mu*E:E + lbda/2*Tr(E)^2
+        self.psi = (self.mu * np.einsum('mij,mij->m', self.E, self.E) +
+                    self.lbda/2 * np.einsum('mii->m', self.E) ** 2)
+        pass
+
     def make_piola_kirchhoff_stress_tensor(self, jac):
 
         # First, update the strain tensor
@@ -265,6 +308,19 @@ class NeoHookeanElasticEnergy(ElasticEnergy):
         # dE = 1/2*(dF^T.F + dF.F^T)
         self.dE = 0.5 * (np.einsum('lij,ljk->lik', np.swapaxes(dJac, 1, 2), jac) +
                          np.einsum('lij,ljk->lik', np.swapaxes(jac, 1, 2), dJac))
+        pass
+
+    def make_energy_density(self, jac):
+        
+        # First, update the strain tensor
+        self.make_strain_tensor(jac)
+
+        # J   = det(F)
+        # I1  = Tr(F^T.F)
+        # psi = mu/2*(I1 - 3 - 2*log(J)) + lbda/2*log(J)^2
+        logJ     = np.log(np.linalg.det(jac))
+        I1       = np.einsum('mji,mji->m', jac, jac)
+        self.psi = self.mu/2 * (I1 - 3 - 2*logJ) + self.lbda/2 * logJ**2
         pass
 
     def make_piola_kirchhoff_stress_tensor(self, jac):
