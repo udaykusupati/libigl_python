@@ -46,6 +46,7 @@ class ElasticSolid(object):
                                   for idx in range(self.v.shape[0])]).reshape(-1, 1)
 
         self.W  = None # (#t,)
+        self.Dm = None
         self.Ds = None
         self.dv = None
         self.F  = None
@@ -115,7 +116,7 @@ class ElasticSolid(object):
         '''
         Make a diagonal mass matrix (#v, #v)
         '''
-        M = self.vertex_tet_sum(self.W)
+        M = self.vertex_tet_sum(self.W0)
         self.M = 1 / 4 * M * self.rho
 
     def make_shape_matrix(self):
@@ -130,7 +131,8 @@ class ElasticSolid(object):
         Ds = np.swapaxes(Ds, 1, 2)
         self.Ds = Ds
         if self.Bm is None:
-            self.Bm = np.linalg.inv(self.Ds)
+            self.Dm = Ds.copy()
+            self.Bm = np.linalg.inv(self.Dm)
 
     def make_jacobian(self):
         '''
@@ -207,14 +209,9 @@ class ElasticSolid(object):
         d2 = (v_disp[self.t[:, 1]] - v_disp[self.t[:, 3]])
         d3 = (v_disp[self.t[:, 2]] - v_disp[self.t[:, 3]])
         dDs = np.stack((d1, d2, d3))
-        print(dDs.shape)
-        print(d1.shape)
         dDs = np.swapaxes(dDs, 0, 1)
-        print(dDs.shape)
         dDs = np.swapaxes(dDs, 1, 2)
-        print(dDs.shape)
         
-
         # Differential of the Jacobian
         self.dF = np.einsum('lij,ljk->lik', dDs, self.Bm)
 
@@ -246,10 +243,11 @@ class ElasticSolid(object):
         self.velocity += dt * self.pin_mask * np.einsum('ij,jk->ik', D, self.f + self.f_ext)
         v_disp         = self.velocity * dt
         self.displace(v_disp) # Pinning is taken care of here as well
-        print(np.mean(np.linalg.norm(self.f, axis=-1)))
-        print(np.mean(np.linalg.norm(self.f_ext, axis=-1)))
-        print()
+        # print(np.mean(np.linalg.norm(self.f, axis=-1)))
+        # print(np.mean(np.linalg.norm(self.f_ext, axis=-1)))
+        # print()
 
+    '''TODO'''
     def implicit_integration_step(self, dt=1e-6, steps=2):
         '''
         Input:
@@ -257,49 +255,79 @@ class ElasticSolid(object):
         - steps : number of steps taken per time step
         '''
 
+        self.explicit_integration_step(dt=dt)
+
         prev_pos = self.v.copy()
-        tot_disp = np.zeros_like(prev_pos)
-        new_velocity = self.velocity.copy()
         print("New time step")
         for step in range(steps):
             # fd = -self.gamma * self.compute_force_differentials(new_velocity)
-            ft = self.f + self.f_ext
+            ft = self.f #+ self.f_ext
+            ft = 0.
             # print("Damping: {}".format(np.mean(np.linalg.norm(fd, axis=-1))))
             # print("Elastic: {}".format(np.mean(np.linalg.norm(self.f axis=-1))))
-            print("Total: {}".format(np.mean(np.linalg.norm(ft, axis=-1))))
+            # print("Total: {}".format(np.mean(np.linalg.norm(ft, axis=-1))))
 
             # def LHS(dv):
             #     return (1 / dt ** 2 * np.einsum('i,ij->ij', self.M, dv) +
             #             (1 + self.gamma / dt) * self.compute_force_differentials(dv))
 
             def LHS(dx):
-                return (1 / dt ** 2 * np.einsum('i,ij->ij', self.M, dx) + self.compute_force_differentials(-dx))
+                return (1 / dt ** 2 * np.einsum('i,ij->ij', self.M, dx) )
 
-            RHS = 1 / dt * np.einsum('i,ij->ij', self.M, self.velocity - new_velocity) + ft
+            # def LHS(dx):
+            #     return (1 / dt ** 2 * np.einsum('i,ij->ij', self.M, dx) + self.compute_force_differentials(-dx))
+
+            # RHS = 1 / dt * np.einsum('i,ij->ij', self.M, self.velocity - new_velocity) + ft
+            RHS = 1 / dt * np.einsum('i,ij->ij', self.M, self.velocity) + ft
+
             # New displacement
             dx = self.pin_mask * conjugate_gradient(LHS, RHS)
+            print("Residuals: {}".format(np.linalg.norm(LHS(dx) - RHS)))
             # print("RHS: {}".format(np.mean(np.linalg.norm(RHS, axis=-1))))
-            print("Correction: {}".format(np.mean(np.linalg.norm(dx, axis=-1))))
+            # print("Correction: {}".format(np.mean(np.linalg.norm(dx, axis=-1))))
             # print("Velocity: {}".format(np.mean(np.linalg.norm(new_velocity, axis=-1))))
-            self.displace(dx) # Updates the force too
-            tot_disp     += dx
-            new_velocity += dx / dt
+            
+            self.v += dx
+            self.make_shape_matrix()
+            # self.displace(dx) # Updates the force too
+        
+        new_velocity = (self.v - prev_pos) / dt
+
         # print("Velocity mean: {}".format(np.mean(np.linalg.norm(new_velocity, axis=-1))))
         # print("Velocity min: {}".format(np.min(np.linalg.norm(new_velocity, axis=-1))))
         # print("Velocity max: {}".format(np.max(np.linalg.norm(new_velocity, axis=-1))))
         # print("Velocity std: {}".format(np.std(np.linalg.norm(new_velocity, axis=-1))))
 
-        print("Displacement mean: {}".format(np.mean(np.linalg.norm(self.v - prev_pos, axis=-1))))
-        print("Speed mean: {}".format(np.mean(np.linalg.norm(self.v - prev_pos, axis=-1)) / dt))
+        # print("Displacement mean: {}".format(np.mean(np.linalg.norm(self.v - prev_pos, axis=-1))))
+        # print("Speed mean: {}".format(np.mean(np.linalg.norm(self.v - prev_pos, axis=-1)) / dt))
+        # print("Velocity mean: {}".format(np.mean(np.linalg.norm(new_velocity, axis=-1)) / dt))
 
-        print("Displacement ok: {}".format(np.allclose(tot_disp, self.v - prev_pos)))
-        print("Velocity ok: {}".format(np.allclose((new_velocity - self.velocity)*dt, self.v - prev_pos)))
+        # print("Displacement ok: {}".format(np.allclose(tot_disp, self.v - prev_pos)))
+        # print("Velocity ok: {}".format(np.allclose((new_velocity - self.velocity)*dt, self.v - prev_pos)))
+        # print("Velocity ok (bis): {}".format(np.allclose(new_velocity*dt, self.v - prev_pos)))
 
-        # self.velocity = new_velocity.copy()
-        self.velocity = (self.v - prev_pos) / dt
+        self.velocity = new_velocity.copy()
+        # self.velocity = (self.v - prev_pos) / dt
 
 
         print()
+
+    def equilibrium_step(self):
+
+        ft = self.f # + self.f_ext
+
+        # Solve K(x)dx = f_tot (Newton step on total energy)
+        def LHS(dx):
+            return self.compute_force_differentials(-dx)
+        
+        RHS = ft
+
+        # New displacement
+        dx = self.pin_mask * conjugate_gradient(LHS, RHS)
+        self.displace(dx) # Updates the force too
+
+        # assert False
+
 
 # -----------------------------------------------------------------------------
 #                                    Test
@@ -317,7 +345,7 @@ if __name__ == '__main__':
     damping = 0.
     young   = 1e6 # [Pa] 
     poisson = 0.2
-    dt      = 1e-3
+    dt      = 1e-4
 
     # Find some of the lowest vertices and pin them
     pin_idx = []
@@ -349,7 +377,7 @@ if __name__ == '__main__':
     if True:
 
         # iterations of simulation
-        iterations = 100
+        iterations = 10
 
         # save the images for video
         save_video = False
@@ -363,6 +391,7 @@ if __name__ == '__main__':
             for i in range(iterations):
                 # S.explicit_integration_step(dt=dt)
                 S.implicit_integration_step(dt=dt, steps=3)
+                # S.equilibrium_step()
                 M.mlab_source.reset(x=S.v[:, 0], y=S.v[:, 1], z=S.v[:, 2])
                 yield
                 if save_video:

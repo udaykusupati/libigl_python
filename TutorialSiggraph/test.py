@@ -48,7 +48,7 @@ def test_diff_jacobian(solid):
     tiled_dF = np.tile(dF.reshape(1, 3, 3), (solid.t.shape[0], 1, 1))
 
     # Find the correct dv
-    v_def = solid.v @ F.T
+    v_def  = solid.v @ F.T
     v_plus_dv_def = solid.v @ (F + dF).T
     dv_def = v_plus_dv_def - v_def
 
