@@ -205,12 +205,10 @@ class ElasticSolid(object):
         '''
 
         # Compute the displacement differentials
-        d1 = (v_disp[self.t[:, 0]] - v_disp[self.t[:, 3]])
-        d2 = (v_disp[self.t[:, 1]] - v_disp[self.t[:, 3]])
-        d3 = (v_disp[self.t[:, 2]] - v_disp[self.t[:, 3]])
-        dDs = np.stack((d1, d2, d3))
-        dDs = np.swapaxes(dDs, 0, 1)
-        dDs = np.swapaxes(dDs, 1, 2)
+        d1 = (v_disp[self.t[:, 0]] - v_disp[self.t[:, 3]]).reshape(-1, 3, 1)
+        d2 = (v_disp[self.t[:, 1]] - v_disp[self.t[:, 3]]).reshape(-1, 3, 1)
+        d3 = (v_disp[self.t[:, 2]] - v_disp[self.t[:, 3]]).reshape(-1, 3, 1)
+        dDs = np.concatenate((d1, d2, d3), axis=2)
         
         # Differential of the Jacobian
         self.dF = np.einsum('lij,ljk->lik', dDs, self.Bm)
@@ -221,6 +219,7 @@ class ElasticSolid(object):
         # Differential of the forces
         dH = np.einsum('lij,ljk->lik', self.ee.dP, np.swapaxes(self.Bm, 1, 2))
         dH = - np.einsum('i,ijk->ijk', self.W0, dH)
+
         # Same as for the elastic forces
         dfx = self.vertex_tet_sum(np.hstack((dH[:, 0, 0], dH[:, 0, 1], dH[:, 0, 2],
                                              -dH[:, 0, 0] - dH[:, 0, 1] - dH[:, 0, 2])))
@@ -243,9 +242,6 @@ class ElasticSolid(object):
         self.velocity += dt * self.pin_mask * np.einsum('ij,jk->ik', D, self.f + self.f_ext)
         v_disp         = self.velocity * dt
         self.displace(v_disp) # Pinning is taken care of here as well
-        # print(np.mean(np.linalg.norm(self.f, axis=-1)))
-        # print(np.mean(np.linalg.norm(self.f_ext, axis=-1)))
-        # print()
 
     '''TODO'''
     def implicit_integration_step(self, dt=1e-6, steps=2):
@@ -255,6 +251,7 @@ class ElasticSolid(object):
         - steps : number of steps taken per time step
         '''
 
+        # Provide the displacement as the initial guess to the conjugate gradient method
         self.explicit_integration_step(dt=dt)
 
         prev_pos = self.v.copy()
@@ -312,22 +309,69 @@ class ElasticSolid(object):
 
         print()
 
-    def equilibrium_step(self):
+    def assemble_stiffness(self):
+        K = np.zeros(shape=(self.v.shape[0], self.v.shape[0]))
+        for i in range(self.v.shape[0]):
+            e_i = np.zeros(shape=(self.v.shape[0], 3))
+            e_i[i, 0] = 1.
+            K[:, i] = self.compute_force_differentials(-e_i)[:, 0]
 
-        ft = self.f # + self.f_ext
-
-        # Solve K(x)dx = f_tot (Newton step on total energy)
-        def LHS(dx):
-            return self.compute_force_differentials(-dx)
         
+        return K
+
+
+    def equilibrium_step(self, tet):
+
+        ft = self.f + self.f_ext
+        # ft = self.f_ext
+        # print(self.ee.P[0])
+
+        # Solve [K(x)+alpha 1.1^T]dx = f_tot (Newton step on total energy)
+        def LHS(dx):
+            dx[tet[0]] = 0.
+            dx[tet[1]] = 0.
+            dx[tet[2]] = 0.
+            df = self.compute_force_differentials(-dx)
+            df[tet[0]] = 0.
+            df[tet[1]] = 0.
+            df[tet[2]] = 0.
+            return df
+        
+        ft[tet[0]] = 0.
+        ft[tet[1]] = 0.
+        ft[tet[2]] = 0.
         RHS = ft
 
+        K = self.assemble_stiffness()
+        K[tet[0]] = 0.
+        K[tet[1]] = 0.
+        K[tet[2]] = 0.
+        # Build pseudo inverse
+        eigval, eigvec = np.linalg.eigh(K)
+        print(eigval[:15])
+        # eigValInv = np.zeros_like(eigval)
+        # eigValInv[1:] = 1./eigval[1:]
+        # pinvK = eigvec @ np.diag(eigValInv) @ eigvec.T
+        # dx = pinvK @ RHS
+        # dx = np.linalg.lstsq(K, RHS)[0]
+
         # New displacement
-        dx = self.pin_mask * conjugate_gradient(LHS, RHS)
-        self.displace(dx) # Updates the force too
+        dx0 = 1e-5 * np.random.rand(self.v.shape[0], 3)
+        dx0[tet[0]] = 0.
+        dx0[tet[1]] = 0.
+        dx0[tet[2]] = 0.
+        dx = self.pin_mask * conjugate_gradient(LHS, RHS, x0=dx0)
+        print(dx[tet[0]])
+        # print(np.linalg.norm(dx))
+        # print("Residuals with force diff: {}".format(np.linalg.norm(LHS(dx) - RHS)))
+        print(np.ones(shape=(self.v.shape[0])) @ dx / self.v.shape[0] / np.linalg.norm(dx, axis=0, keepdims=True))
+        print("Residuals with K: {}".format(np.linalg.norm(K @ dx - RHS)))
+        print()
 
+        # print(self.v[0,:])
+        self.displace(0.1 * dx) # Updates the force too
+        # print(self.v[0,:])
         # assert False
-
 
 # -----------------------------------------------------------------------------
 #                                    Test
@@ -341,11 +385,11 @@ if __name__ == '__main__':
     v, t = igl.read_msh("meshes/ball.msh")
 
     # Some characteristics
-    rho     = 100  # [kg.m-3] 10000kg.m-3 to see gravity effects
+    rho     = 10000  # [kg.m-3] 10000kg.m-3 to see gravity effects
     damping = 0.
     young   = 1e6 # [Pa] 
     poisson = 0.2
-    dt      = 1e-4
+    dt      = 1e-3
 
     # Find some of the lowest vertices and pin them
     pin_idx = []
@@ -361,23 +405,32 @@ if __name__ == '__main__':
     # f_ext[force_idx, 0] = 1e3 # [N]
     print("Vertices on which a force is applied: {}".format(force_idx))
 
-    ee = LinearElasticEnergy(young, poisson)
+    # ee = LinearElasticEnergy(young, poisson)
     # ee = CorotatedElasticEnergy(young, poisson)
-    # ee = NeoHookeanElasticEnergy(young, poisson)
+    ee = NeoHookeanElasticEnergy(young, poisson)
     S  = ElasticSolid(v, t, ee, rho=rho, damping=damping, 
                       pin_idx=pin_idx, f_ext=f_ext, self_weight=False)
 
     # initial deformation
     # This might invert some elements and make Neo Hookean energy 
     # blow up under pinning constraints
+    tb = igl.boundary_facets(t)
     v_def = v.copy()
-    v_def[:, 2] *= 1.5 
+    v_def[tb[0], 2] *= 1.5
     S.update_shape(v_def)
+
+    # K = S.assemble_stiffness()
+    # eigval, eigvec = np.linalg.eigh(K)
+    # print(K[:5, :5])
+    # print(eigvec[:5, 0])
+    # print(np.allclose(K, K.T))
+    # print(eigval[:15])
+    # print()
 
     if True:
 
         # iterations of simulation
-        iterations = 10
+        iterations = 100
 
         # save the images for video
         save_video = False
@@ -390,8 +443,8 @@ if __name__ == '__main__':
             M = mlab.triangular_mesh(S.v[:, 0], S.v[:, 1], S.v[:, 2], tb)
             for i in range(iterations):
                 # S.explicit_integration_step(dt=dt)
-                S.implicit_integration_step(dt=dt, steps=3)
-                # S.equilibrium_step()
+                # S.implicit_integration_step(dt=dt, steps=3)
+                S.equilibrium_step(tb[0])
                 M.mlab_source.reset(x=S.v[:, 0], y=S.v[:, 1], z=S.v[:, 2])
                 yield
                 if save_video:
