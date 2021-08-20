@@ -324,28 +324,30 @@ class ElasticSolid(object):
 
         ft = self.f + self.f_ext
         # ft = self.f_ext
-        # print(self.ee.P[0])
 
         # Solve [K(x)+alpha 1.1^T]dx = f_tot (Newton step on total energy)
         def LHS(dx):
             dx[tet[0]] = 0.
-            dx[tet[1]] = 0.
-            dx[tet[2]] = 0.
+            dx[tet[1], 1:] = 0.
+            dx[tet[2], 2] = 0.
             df = self.compute_force_differentials(-dx)
             df[tet[0]] = 0.
-            df[tet[1]] = 0.
-            df[tet[2]] = 0.
+            df[tet[1], 1:] = 0.
+            df[tet[2], 2] = 0.
             return df
         
         ft[tet[0]] = 0.
-        ft[tet[1]] = 0.
-        ft[tet[2]] = 0.
+        ft[tet[1], 1:] = 0.
+        ft[tet[2], 2] = 0.
         RHS = ft
 
         K = self.assemble_stiffness()
         K[tet[0]] = 0.
-        K[tet[1]] = 0.
-        K[tet[2]] = 0.
+        K[tet[1], 1:] = 0.
+        K[tet[2], 2] = 0.
+        K[:, tet[0]] = 0.
+        K[1:, tet[1]] = 0.
+        K[2, tet[2]] = 0.
         # Build pseudo inverse
         eigval, eigvec = np.linalg.eigh(K)
         print(eigval[:15])
@@ -358,20 +360,16 @@ class ElasticSolid(object):
         # New displacement
         dx0 = 1e-5 * np.random.rand(self.v.shape[0], 3)
         dx0[tet[0]] = 0.
-        dx0[tet[1]] = 0.
-        dx0[tet[2]] = 0.
+        dx0[tet[1], 1:] = 0.
+        dx0[tet[2], 2] = 0.
         dx = self.pin_mask * conjugate_gradient(LHS, RHS, x0=dx0)
-        print(dx[tet[0]])
-        # print(np.linalg.norm(dx))
         # print("Residuals with force diff: {}".format(np.linalg.norm(LHS(dx) - RHS)))
-        print(np.ones(shape=(self.v.shape[0])) @ dx / self.v.shape[0] / np.linalg.norm(dx, axis=0, keepdims=True))
+        # print(np.ones(shape=(self.v.shape[0])) @ dx / self.v.shape[0] / np.linalg.norm(dx, axis=0, keepdims=True))
         print("Residuals with K: {}".format(np.linalg.norm(K @ dx - RHS)))
         print()
 
-        # print(self.v[0,:])
         self.displace(0.1 * dx) # Updates the force too
-        # print(self.v[0,:])
-        # assert False
+
 
 # -----------------------------------------------------------------------------
 #                                    Test
@@ -405,9 +403,9 @@ if __name__ == '__main__':
     # f_ext[force_idx, 0] = 1e3 # [N]
     print("Vertices on which a force is applied: {}".format(force_idx))
 
-    # ee = LinearElasticEnergy(young, poisson)
+    ee = LinearElasticEnergy(young, poisson)
     # ee = CorotatedElasticEnergy(young, poisson)
-    ee = NeoHookeanElasticEnergy(young, poisson)
+    # ee = NeoHookeanElasticEnergy(young, poisson)
     S  = ElasticSolid(v, t, ee, rho=rho, damping=damping, 
                       pin_idx=pin_idx, f_ext=f_ext, self_weight=False)
 
@@ -416,7 +414,8 @@ if __name__ == '__main__':
     # blow up under pinning constraints
     tb = igl.boundary_facets(t)
     v_def = v.copy()
-    v_def[tb[0], 2] *= 1.5
+    v_def[:, 2] *= 1.5
+    # v_def[tb[0], 2] *= 1.5
     S.update_shape(v_def)
 
     # K = S.assemble_stiffness()
