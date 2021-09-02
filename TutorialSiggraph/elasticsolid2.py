@@ -310,12 +310,19 @@ class ElasticSolid(object):
         print()
 
     def assemble_stiffness(self):
-        K = np.zeros(shape=(self.v.shape[0], self.v.shape[0]))
+        K = np.zeros(shape=(3*self.v.shape[0], 3*self.v.shape[0]))
         for i in range(self.v.shape[0]):
-            e_i = np.zeros(shape=(self.v.shape[0], 3))
-            e_i[i, 0] = 1.
-            K[:, i] = self.compute_force_differentials(-e_i)[:, 0]
+            e_1 = np.zeros(shape=(self.v.shape[0], 3))
+            e_1[i, 0] = 1.
+            K[:, 3*i] = self.compute_force_differentials(-e_1).reshape(-1,)
 
+            e_2 = np.zeros(shape=(self.v.shape[0], 3))
+            e_2[i, 1] = 1.
+            K[:, 3*i+1] = self.compute_force_differentials(-e_2).reshape(-1,)
+
+            e_3 = np.zeros(shape=(self.v.shape[0], 3))
+            e_3[i, 2] = 1.
+            K[:, 3*i+2] = self.compute_force_differentials(-e_3).reshape(-1,)
         
         return K
 
@@ -327,30 +334,44 @@ class ElasticSolid(object):
 
         # Solve [K(x)+alpha 1.1^T]dx = f_tot (Newton step on total energy)
         def LHS(dx):
-            dx[tet[0]] = 0.
-            dx[tet[1], 1:] = 0.
-            dx[tet[2], 2] = 0.
+            dx[tet[0], :]  = 0.
+            dx[tet[1], :2] = 0.
+            dx[tet[2], 0]  = 0.
             df = self.compute_force_differentials(-dx)
-            df[tet[0]] = 0.
-            df[tet[1], 1:] = 0.
-            df[tet[2], 2] = 0.
+            df[tet[0], :]  = 0.
+            df[tet[1], :2] = 0.
+            df[tet[2], 0]  = 0.
             return df
         
-        ft[tet[0]] = 0.
-        ft[tet[1], 1:] = 0.
-        ft[tet[2], 2] = 0.
+        ft[tet[0], :]  = 0.
+        ft[tet[1], :2] = 0.
+        ft[tet[2], 0]  = 0.
         RHS = ft
 
-        K = self.assemble_stiffness()
-        K[tet[0]] = 0.
-        K[tet[1], 1:] = 0.
-        K[tet[2], 2] = 0.
-        K[:, tet[0]] = 0.
-        K[1:, tet[1]] = 0.
-        K[2, tet[2]] = 0.
+        idxElim = [
+            3*tet[0],
+            3*tet[0]+1,
+            3*tet[0]+2,
+            3*tet[1],
+            3*tet[1]+1,
+            3*tet[2]
+        ]
+        idxKeep = [id for id in range(3*ft.shape[0]) if id not in idxElim]
+
+        # K = self.assemble_stiffness()
+
+        # K = np.delete(K, idxElim, axis=0)
+        # K = np.delete(K, idxElim, axis=1)
+
+        # K[3*tet[0]:3*tet[0]+3, :]  = 0.
+        # K[3*tet[1]:3*tet[1]+2, :]  = 0.
+        # K[3*tet[2]:3*tet[2]+1, :]  = 0.
+        # K[:, 3*tet[0]:3*tet[0]+3]  = 0.
+        # K[:, 3*tet[1]:3*tet[1]+2]  = 0.
+        # K[:, 3*tet[2]:3*tet[2]+1]  = 0.
         # Build pseudo inverse
-        eigval, eigvec = np.linalg.eigh(K)
-        print(eigval[:15])
+        # eigval, eigvec = np.linalg.eigh(K)
+        # print(eigval[:15])
         # eigValInv = np.zeros_like(eigval)
         # eigValInv[1:] = 1./eigval[1:]
         # pinvK = eigvec @ np.diag(eigValInv) @ eigvec.T
@@ -358,17 +379,37 @@ class ElasticSolid(object):
         # dx = np.linalg.lstsq(K, RHS)[0]
 
         # New displacement
+
+        # def LHS_K(dx):
+        #     delDX  = np.delete(dx.reshape(-1,), idxElim, axis=0)
+        #     prod0  = np.zeros(shape=(3*ft.shape[0]))
+        #     prod0[idxKeep] = (K @ delDX)
+        #     prod0  = prod0.reshape(-1, 3)
+        #     return prod0
+
         dx0 = 1e-5 * np.random.rand(self.v.shape[0], 3)
-        dx0[tet[0]] = 0.
-        dx0[tet[1], 1:] = 0.
-        dx0[tet[2], 2] = 0.
+        # dx0[tet[0], :]  = 0.
+        # dx0[tet[1], :2] = 0.
+        # dx0[tet[2], 0]  = 0.
         dx = self.pin_mask * conjugate_gradient(LHS, RHS, x0=dx0)
+        # dx = self.pin_mask * conjugate_gradient(lambda dx:(K @ dx.reshape(-1,)).reshape(-1, 3), RHS, x0=dx0)
+        lhs1 = LHS(dx0)
+        # lhs2 = LHS_K(dx0)
+        # delDX  = np.delete(dx0.reshape(-1,), idxElim, axis=0)
+        # prod0  = np.zeros(shape=(3*ft.shape[0]))
+        # prod0[idxKeep]  = (K @ delDX)
+        # prod0  = prod0.reshape(-1, 3)
+        # fdiff0 = self.compute_force_differentials(-dx0)
+        # print(np.linalg.norm(lhs1[:, 0] - lhs2[:, 0]))
+        # print(lhs1[tet[0]])
+        # print(lhs2[tet[0]])
+        # assert False
         # print("Residuals with force diff: {}".format(np.linalg.norm(LHS(dx) - RHS)))
         # print(np.ones(shape=(self.v.shape[0])) @ dx / self.v.shape[0] / np.linalg.norm(dx, axis=0, keepdims=True))
-        print("Residuals with K: {}".format(np.linalg.norm(K @ dx - RHS)))
+        # print("Residuals with K: {}".format(np.linalg.norm(K @ dx - RHS)))
         print()
 
-        self.displace(0.1 * dx) # Updates the force too
+        self.displace(0.5 * dx) # Updates the force too
 
 
 # -----------------------------------------------------------------------------
@@ -389,6 +430,10 @@ if __name__ == '__main__':
     poisson = 0.2
     dt      = 1e-3
 
+    # a = np.array([[1, 2, 3], [4, 5, 6]])
+    # print(a.reshape(-1,))
+    # print(a.reshape(-1,).reshape(-1, 3))
+
     # Find some of the lowest vertices and pin them
     pin_idx = []
     # minZ    = np.min(v[:, 2])
@@ -403,9 +448,9 @@ if __name__ == '__main__':
     # f_ext[force_idx, 0] = 1e3 # [N]
     print("Vertices on which a force is applied: {}".format(force_idx))
 
-    ee = LinearElasticEnergy(young, poisson)
+    # ee = LinearElasticEnergy(young, poisson)
     # ee = CorotatedElasticEnergy(young, poisson)
-    # ee = NeoHookeanElasticEnergy(young, poisson)
+    ee = NeoHookeanElasticEnergy(young, poisson)
     S  = ElasticSolid(v, t, ee, rho=rho, damping=damping, 
                       pin_idx=pin_idx, f_ext=f_ext, self_weight=False)
 
@@ -429,7 +474,7 @@ if __name__ == '__main__':
     if True:
 
         # iterations of simulation
-        iterations = 100
+        iterations = 20
 
         # save the images for video
         save_video = False
