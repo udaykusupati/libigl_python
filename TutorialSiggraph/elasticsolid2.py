@@ -307,8 +307,6 @@ class ElasticSolid(object):
         # self.velocity = (self.v - prev_pos) / dt
 
 
-        print()
-
     def assemble_stiffness(self):
         K = np.zeros(shape=(3*self.v.shape[0], 3*self.v.shape[0]))
         for i in range(self.v.shape[0]):
@@ -330,33 +328,25 @@ class ElasticSolid(object):
     def equilibrium_step(self, tet):
 
         ft = self.f + self.f_ext
+        ft *= self.pin_mask
         # ft = self.f_ext
 
         # Solve [K(x)+alpha 1.1^T]dx = f_tot (Newton step on total energy)
         def LHS(dx):
-            dx[tet[0], :]  = 0.
-            dx[tet[1], :2] = 0.
-            dx[tet[2], 0]  = 0.
-            df = self.compute_force_differentials(-dx)
-            df[tet[0], :]  = 0.
-            df[tet[1], :2] = 0.
-            df[tet[2], 0]  = 0.
-            return df
+            df = self.compute_force_differentials(-dx*self.pin_mask)
+            return df*self.pin_mask
         
-        ft[tet[0], :]  = 0.
-        ft[tet[1], :2] = 0.
-        ft[tet[2], 0]  = 0.
         RHS = ft
 
-        idxElim = [
-            3*tet[0],
-            3*tet[0]+1,
-            3*tet[0]+2,
-            3*tet[1],
-            3*tet[1]+1,
-            3*tet[2]
-        ]
-        idxKeep = [id for id in range(3*ft.shape[0]) if id not in idxElim]
+        # idxElim = [
+        #     3*tet[0],
+        #     3*tet[0]+1,
+        #     3*tet[0]+2,
+        #     3*tet[1],
+        #     3*tet[1]+1,
+        #     3*tet[2]
+        # ]
+        # idxKeep = [id for id in range(3*ft.shape[0]) if id not in idxElim]
 
         # K = self.assemble_stiffness()
 
@@ -393,7 +383,7 @@ class ElasticSolid(object):
         # dx0[tet[2], 0]  = 0.
         dx = self.pin_mask * conjugate_gradient(LHS, RHS, x0=dx0)
         # dx = self.pin_mask * conjugate_gradient(lambda dx:(K @ dx.reshape(-1,)).reshape(-1, 3), RHS, x0=dx0)
-        lhs1 = LHS(dx0)
+        # lhs1 = LHS(dx0)
         # lhs2 = LHS_K(dx0)
         # delDX  = np.delete(dx0.reshape(-1,), idxElim, axis=0)
         # prod0  = np.zeros(shape=(3*ft.shape[0]))
@@ -407,9 +397,24 @@ class ElasticSolid(object):
         # print("Residuals with force diff: {}".format(np.linalg.norm(LHS(dx) - RHS)))
         # print(np.ones(shape=(self.v.shape[0])) @ dx / self.v.shape[0] / np.linalg.norm(dx, axis=0, keepdims=True))
         # print("Residuals with K: {}".format(np.linalg.norm(K @ dx - RHS)))
-        print()
+        
+        # self.displace(0.5 * dx) # Updates the force too
 
-        self.displace(0.5 * dx) # Updates the force too
+        step_size = 2
+        g_old = np.linalg.norm(ft)
+        max_l_iter = 20
+        for l_iter in range(max_l_iter):
+            step_size *= 0.5
+            dx_search = dx*step_size
+            self.displace(dx_search)
+            ft_new = self.f_ext + self.f
+            ft_new *= self.pin_mask
+            g = np.linalg.norm(ft_new)
+            if g < g_old or l_iter == max_l_iter-1:
+                print("Force residual norm: " + str(g) + " Line search Iters: " + str(l_iter))
+                break
+            else:
+                self.displace(-dx_search)
 
 
 # -----------------------------------------------------------------------------
@@ -438,6 +443,9 @@ if __name__ == '__main__':
     pin_idx = []
     # minZ    = np.min(v[:, 2])
     # pin_idx = np.arange(v.shape[0])[v[:, 2] < minZ + 0.1]
+
+    maxZ    = np.max(v[:, 2])
+    pin_idx = np.arange(v.shape[0])[v[:, 2] > maxZ - 0.1]
     print("Pinned vertices: {}".format(pin_idx))
 
     # Add forces at the top 
@@ -452,14 +460,14 @@ if __name__ == '__main__':
     # ee = CorotatedElasticEnergy(young, poisson)
     ee = NeoHookeanElasticEnergy(young, poisson)
     S  = ElasticSolid(v, t, ee, rho=rho, damping=damping, 
-                      pin_idx=pin_idx, f_ext=f_ext, self_weight=False)
+                      pin_idx=pin_idx, f_ext=f_ext, self_weight=True)
 
     # initial deformation
     # This might invert some elements and make Neo Hookean energy 
     # blow up under pinning constraints
     tb = igl.boundary_facets(t)
     v_def = v.copy()
-    v_def[:, 2] *= 1.5
+    v_def[:, 2] *= 1.2
     # v_def[tb[0], 2] *= 1.5
     S.update_shape(v_def)
 
@@ -474,7 +482,7 @@ if __name__ == '__main__':
     if True:
 
         # iterations of simulation
-        iterations = 20
+        iterations = 1000
 
         # save the images for video
         save_video = False
